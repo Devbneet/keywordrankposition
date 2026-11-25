@@ -1,0 +1,32 @@
+{
+  "clients": [
+    {
+      "client_id": "example-client",
+      "client_name": "Example Client Pty Ltd",
+      "website_domain": "example.com",
+      "target_url_match": "https://example.com",
+      "active": true,
+      "locations": [
+        {
+          "location_name": "Sydney CBD",
+          "latitude": -33.8688,
+          "longitude": 151.2093,
+          "search_depth": 50
+        }
+      ],
+      "google_sheet": {
+        "spreadsheet_id": "REPLACE_WITH_GOOGLE_SHEET_ID",
+        "worksheet_name": "Keywords",
+        "column_mapping": {
+          "keyword": "C",
+          "search_volume": "D",
+          "competition": "E",
+          "landing_page": "F",
+          "serp_url": "G",
+          "latest_date_start": "H"
+        }
+      }
+    }
+  ]
+}
+
