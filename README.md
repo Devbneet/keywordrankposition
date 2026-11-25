@@ -1,56 +1,66 @@
-# Digital Minds Keyword Ranking Automation
+# Digital Minds Rank Tracker (Chrome Extension)
 
-An internal, 100% free keyword ranking automation tool for **Digital Minds** that automates local Google organic rank tracking and updates client Google Sheets while preserving every detail of the existing sheet's formatting and history.
+An internal, 100% free **Chrome Extension (Manifest V3)** for **Digital Minds** to check location-specific organic keyword rankings and update client Google Sheets while preserving all spreadsheet formatting and history.
 
-## Current Status
+## Phase 1 Status
 
-**All 11 Phases Completed** — see [ROADMAP.md](ROADMAP.md) for the full breakdown and [SHEET_REQUIREMENTS.md](SHEET_REQUIREMENTS.md) for the 24 non-negotiable Google Sheet preservation rules.
+**Phase 1: Clean previous Python project and initialize Chrome extension** — Complete (ready for manual unpacked extension verification in Chrome).
 
-## Setup Instructions (Windows / PowerShell)
+> Note: The previous Python/Playwright implementation is preserved safely on the `backup/python-version` branch.
 
-1. **Create and activate a virtual environment:**
+## Folder Structure
 
-   ```powershell
-   python -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   ```
+```text
+keywordrankposition/
+├── manifest.json               # Chrome Extension Manifest V3 configuration
+├── package.json                # Node.js native test runner configuration
+├── README.md                   # Setup, testing, and Chrome loading guide
+├── ROADMAP.md                  # 12-phase development roadmap
+├── SHEET_REQUIREMENTS.md       # Non-negotiable Google Sheet preservation rules
+├── ARCHITECTURE.md             # Extension architecture & design principles
+├── .gitignore                  # Ignores credentials, local exports, OS/IDE files
+├── background/
+│   └── service-worker.js       # MV3 background service worker
+├── popup/
+│   ├── popup.html              # Extension popup UI
+│   ├── popup.css
+│   └── popup.js
+├── dashboard/
+│   ├── dashboard.html          # Agency workspace page
+│   ├── dashboard.css
+│   └── dashboard.js
+├── content/
+│   └── search-content.js       # Content script placeholder (Phases 3-4)
+├── modules/
+│   ├── location/               # Geolocation simulation (Phase 2)
+│   ├── ranking/                # Organic rank detection (Phases 4-5)
+│   ├── sheets/                 # Google Sheets reader & updater (Phases 8-9)
+│   ├── clients/                # Multi-client config (Phase 7)
+│   ├── jobs/                   # Bulk job & pause/resume (Phase 6)
+│   └── storage/
+│       └── storage.js          # chrome.storage.local wrapper & health ping
+├── utils/
+│   ├── health.js               # Standardized health report builder
+│   └── messages.js             # Popup <-> service worker message constants
+├── icons/                      # Extension icons (16, 32, 48, 128 px)
+├── tests/
+│   └── smoke.test.mjs          # Node.js native smoke tests
+└── docs/
+```
 
-2. **Install Python dependencies and Chromium:**
+## Running Automated Tests
 
-   ```powershell
-   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-   .\.venv\Scripts\python.exe -m playwright install chromium
-   ```
+Requires Node.js 20+ (no external packages needed):
 
-3. **Create your local environment and client files (never commit these):**
+```powershell
+node --test tests/*.test.mjs
+```
 
-   ```powershell
-   Copy-Item .env.example .env
-   Copy-Item config\clients.example.json config\clients.json
-   ```
+## Loading the Extension in Google Chrome
 
-## Running & Deployment
-
-- **Check health & configuration:**
-
-  ```powershell
-  .\.venv\Scripts\python.exe main.py --check-health
-  ```
-
-- **Launch the Streamlit dashboard:**
-
-  ```powershell
-  .\.venv\Scripts\python.exe -m streamlit run dashboard/app.py
-  ```
-
-- **Generate the weekly Windows Task Scheduler script:**
-
-  ```powershell
-  .\.venv\Scripts\python.exe main.py --generate-scheduler-bat --weekday MON --start-time 09:00
-  ```
-
-- **Run the full test suite:**
-
-  ```powershell
-  .\.venv\Scripts\python.exe -m pytest -v
-  ```
+1. Open Google Chrome and navigate to `chrome://extensions`.
+2. Turn **Developer mode** ON (top-right toggle).
+3. Click **Load unpacked**.
+4. Select `C:\Users\harsh\Documents\KeywordRankPosition`.
+5. Confirm **Digital Minds Rank Tracker** (`v0.1.0`) appears with no manifest errors.
+6. Click the extension icon in the Chrome toolbar to open the popup, confirm **Extension Health: Healthy**, and click **Open Dashboard**.

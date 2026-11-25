@@ -1,65 +1,28 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
 
-# Virtual environments
-.venv/
-venv/
-env/
-ENV/
-
-# Testing & coverage
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Environment variables & secrets
+# Environment & credentials (never commit secrets or private client data)
 .env
 .env.*
-!.env.example
-
-# Client configurations & credentials (never commit private client data)
-config/clients.json
-config/*.local.json
 credentials/
 *.pem
 *.key
 service_account*.json
 client_secret*.json
+oauth_token*.json
 
-# Runtime data, backups, logs, screenshots, local DBs
-data/*
-!data/.gitkeep
-backups/*
-!backups/.gitkeep
-logs/*
-!logs/.gitkeep
-screenshots/*
-!screenshots/.gitkeep
-*.db
-*.sqlite
-*.sqlite3
+# Local client exports & temporary files
+exports/
+tmp/
+*.log
 
-# IDE / OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
+# Node (if any local tooling is ever used)
+node_modules/
+
+# Legacy Python environment (if not yet removed locally)
+.venv/
+__pycache__/
+.pytest_cache/

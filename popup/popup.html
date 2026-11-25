@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Digital Minds Rank Tracker</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="popup-container">
+      <header class="popup-header">
+        <div class="brand">
+          <span class="brand-badge">DM</span>
+          <div>
+            <h1>Digital Minds Rank Tracker</h1>
+            <p class="version-line">Version <span id="extension-version">-</span></p>
+          </div>
+        </div>
+      </header>
+
+      <section class="status-card" aria-live="polite">
+        <div class="status-row">
+          <span class="status-label">Extension Health</span>
+          <span id="health-pill" class="pill pill-pending">Checking...</span>
+        </div>
+        <p id="health-detail" class="status-detail">
+          Verifying background service worker and local extension storage...
+        </p>
+      </section>
+
+      <div class="actions">
+        <button id="open-dashboard-btn" class="btn-primary" type="button">
+          Open Dashboard
+        </button>
+        <button id="recheck-health-btn" class="btn-secondary" type="button">
+          Recheck Health
+        </button>
+      </div>
+    </main>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
+
