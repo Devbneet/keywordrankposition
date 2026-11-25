@@ -4,35 +4,7 @@ An internal, 100% free keyword ranking automation tool for **Digital Minds** tha
 
 ## Current Status
 
-**Phase 1: Project setup and environment configuration** (Complete / In Verification)
-
-## Project Structure
-
-```text
-keywordrankposition/
-├── main.py                     # CLI entry point
-├── requirements.txt            # Python dependencies
-├── README.md                   # Project overview & setup guide
-├── ROADMAP.md                  # 11-phase development roadmap
-├── SHEET_REQUIREMENTS.md       # Non-negotiable Google Sheet preservation rules
-├── .gitignore                  # Git ignore rules (secrets, venv, runtime data)
-├── .env.example                # Environment variable template
-├── config/
-│   └── clients.example.json    # Sample client configuration (no real client data)
-├── src/
-│   ├── browser/                # Browser automation helpers (Phase 2+)
-│   ├── location/               # Geolocation simulation (Phase 2+)
-│   ├── ranking/                # Organic ranking detection (Phase 3+)
-│   ├── sheets/                 # Google Sheets reading & updating (Phase 6+)
-│   ├── storage/                # SQLite history & caching (Phase 4+)
-│   └── utils/                  # Logging, config, & shared utilities
-├── dashboard/                  # Streamlit dashboard (Phase 9)
-├── tests/                      # Pytest suite & local smoke tests
-├── data/                       # Local SQLite databases (gitignored)
-├── backups/                    # Sheet backups before updates (gitignored)
-├── logs/                       # Application logs (gitignored)
-└── screenshots/                # Verification screenshots (gitignored)
-```
+**All 11 Phases Completed** — see [ROADMAP.md](ROADMAP.md) for the full breakdown and [SHEET_REQUIREMENTS.md](SHEET_REQUIREMENTS.md) for the 24 non-negotiable Google Sheet preservation rules.
 
 ## Setup Instructions (Windows / PowerShell)
 
@@ -43,34 +15,42 @@ keywordrankposition/
    .\.venv\Scripts\Activate.ps1
    ```
 
-2. **Install Python dependencies:**
+2. **Install Python dependencies and Chromium:**
 
    ```powershell
-   pip install -r requirements.txt
+   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+   .\.venv\Scripts\python.exe -m playwright install chromium
    ```
 
-3. **Install Playwright's Chromium browser:**
-
-   ```powershell
-   playwright install chromium
-   ```
-
-4. **Create your local environment file (optional for Phase 1):**
+3. **Create your local environment and client files (never commit these):**
 
    ```powershell
    Copy-Item .env.example .env
+   Copy-Item config\clients.example.json config\clients.json
    ```
 
-## Running the Project (Phase 1)
+## Running & Deployment
 
-Check environment and configuration readiness:
+- **Check health & configuration:**
 
-```powershell
-python main.py
-```
+  ```powershell
+  .\.venv\Scripts\python.exe main.py --check-health
+  ```
 
-Run the local browser smoke test with `pytest`:
+- **Launch the Streamlit dashboard:**
 
-```powershell
-pytest -v
-```
+  ```powershell
+  .\.venv\Scripts\python.exe -m streamlit run dashboard/app.py
+  ```
+
+- **Generate the weekly Windows Task Scheduler script:**
+
+  ```powershell
+  .\.venv\Scripts\python.exe main.py --generate-scheduler-bat --weekday MON --start-time 09:00
+  ```
+
+- **Run the full test suite:**
+
+  ```powershell
+  .\.venv\Scripts\python.exe -m pytest -v
+  ```
