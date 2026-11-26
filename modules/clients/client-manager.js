@@ -27,6 +27,7 @@ export function computeClientOverview({
     status: client.status,
     keywordCount: keywords.length,
     locationCount: locations.length,
+    locationNames: locations.map((l) => l.locationName).filter(Boolean),
     lastRankingCheck: client.lastCheckedAt || latestJob?.completedAt || latestJob?.createdAt || null,
     hasRankingData,
     top3Count: hasRankingData ? rankedResults.filter((r) => r.position <= 3).length : null,

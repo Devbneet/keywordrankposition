@@ -98,12 +98,14 @@ export function createClientStorage({
     const keywords = await listKeywordsByClient(clientId);
     const jobs = await listJobsByClient(clientId);
     const results = await listResultsByClient(clientId);
+    const snapshots = await listSheetSnapshotsByClient(clientId);
 
     const steps = [
       () => db.deleteMany(STORES.LOCATIONS, locations.map((l) => l.locationId)),
       () => db.deleteMany(STORES.KEYWORDS, keywords.map((k) => k.keywordId)),
       () => db.deleteMany(STORES.JOBS, jobs.map((j) => j.jobId)),
       () => db.deleteMany(STORES.RESULTS, results.map((r) => r.recordKey)),
+      () => db.deleteMany(STORES.SHEET_SNAPSHOTS, snapshots.map((s) => s.snapshotKey)),
       () => db.deleteMany(STORES.CLIENTS, [clientId]),
     ];
 
@@ -177,6 +179,18 @@ export function createClientStorage({
     return res?.[ACTIVE_CLIENT_KEY] || { clientId: null, locationId: null };
   }
 
+  async function saveSheetSnapshot(snapshot) {
+    if (!snapshot?.snapshotKey || !snapshot?.clientId) {
+      return { ok: false, error: "snapshotKey and clientId are required." };
+    }
+    return db.putOne(STORES.SHEET_SNAPSHOTS, snapshot);
+  }
+
+  async function listSheetSnapshotsByClient(clientId) {
+    const rows = await db.getByIndex(STORES.SHEET_SNAPSHOTS, "by_client", clientId);
+    return rows.sort((a, b) => String(b.importedAt || "").localeCompare(String(a.importedAt || "")));
+  }
+
   return {
     getSchemaInfo: db.getSchemaInfo,
     saveClient,
@@ -193,6 +207,8 @@ export function createClientStorage({
     listJobsByClient,
     saveResultsBatch,
     listResultsByClient,
+    saveSheetSnapshot,
+    listSheetSnapshotsByClient,
     deleteClientCascade,
     createClientBackup,
     listClientBackups,

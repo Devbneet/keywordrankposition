@@ -7,6 +7,10 @@ import { createJobManager } from "../modules/jobs/job-manager.js";
 import { createJobStorage } from "../modules/jobs/job-storage.js";
 import { createGeolocationController } from "../modules/location/geolocation-controller.js";
 import { createSingleKeywordChecker } from "../modules/ranking/single-keyword-checker.js";
+import { createGoogleAuthClient } from "../modules/sheets/google-auth.js";
+import { createSheetReader } from "../modules/sheets/sheet-reader.js";
+import { applyConfirmedSheetSync } from "../modules/sheets/sheet-sync.js";
+import { createSheetsApiClient } from "../modules/sheets/sheets-api-client.js";
 import { createStorageClient, STORAGE_KEYS } from "../modules/storage/storage.js";
 import { buildHealthReport } from "../utils/health.js";
 import { MESSAGE_TYPES } from "../utils/messages.js";
@@ -53,6 +57,14 @@ function getOrCreateServices(chromeApi) {
     jobManager,
   });
 
+  const googleAuthClient = createGoogleAuthClient({
+    identityApi: chromeApi?.identity,
+    runtimeApi: chromeApi?.runtime,
+    storageClient: storage,
+  });
+  const sheetsApiClient = createSheetsApiClient({ authClient: googleAuthClient });
+  const sheetReader = createSheetReader({ sheetsApiClient, clientStorage });
+
   const bundle = {
     storage,
     searchLock,
@@ -64,6 +76,9 @@ function getOrCreateServices(chromeApi) {
     locationManager,
     keywordManager,
     clientManager,
+    googleAuthClient,
+    sheetsApiClient,
+    sheetReader,
   };
 
   if (storageArea) {
@@ -91,6 +106,8 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
     locationManager,
     keywordManager,
     clientManager,
+    googleAuthClient,
+    sheetReader,
   } = getOrCreateServices(chromeApi);
 
   switch (message.type) {
@@ -295,6 +312,49 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
 
     case MESSAGE_TYPES.CLIENT_BACKUP_RESTORE:
       return clientStorage.restoreClientBackup(message.payload?.backup);
+
+    // Phase 8 Read-Only Google Sheets routes
+    case MESSAGE_TYPES.SHEETS_GET_AUTH_STATUS:
+      return googleAuthClient.getStatus();
+
+    case MESSAGE_TYPES.SHEETS_CONNECT:
+      return googleAuthClient.connect();
+
+    case MESSAGE_TYPES.SHEETS_DISCONNECT:
+      return googleAuthClient.disconnect();
+
+    case MESSAGE_TYPES.SHEETS_TEST_CONNECTION:
+      return googleAuthClient.testConnection({
+        spreadsheetId: message.payload?.spreadsheetId || "",
+      });
+
+    case MESSAGE_TYPES.SHEETS_LIST_WORKSHEETS:
+      return sheetReader.listWorksheets({
+        sheetUrlOrId: message.payload?.sheetUrlOrId || "",
+      });
+
+    case MESSAGE_TYPES.SHEETS_PREVIEW_AND_READ: {
+      const p = message.payload || {};
+      const client = p.clientId ? await clientStorage.getClient(p.clientId) : null;
+      return sheetReader.readAndAnalyzeSheet({
+        clientId: p.clientId,
+        locationId: p.locationId || null,
+        sheetUrlOrId: p.sheetUrlOrId || client?.sheetConfig?.sheetUrl || client?.sheetConfig?.spreadsheetId || "",
+        worksheetId: p.worksheetId ?? client?.sheetConfig?.worksheetId ?? "",
+        worksheetName: p.worksheetName ?? client?.sheetConfig?.worksheetName ?? "",
+        columnConfig: p.columnConfig || client?.sheetConfig || {},
+        excludedRowNumbers: p.excludedRowNumbers || [],
+      });
+    }
+
+    case MESSAGE_TYPES.SHEETS_APPLY_CONFIRMED_SYNC:
+      return applyConfirmedSheetSync({
+        clientStorage,
+        clientId: message.payload?.clientId,
+        incomingKeywords: message.payload?.incomingKeywords || [],
+        snapshot: message.payload?.snapshot,
+        confirmed: Boolean(message.payload?.confirmed),
+      });
 
     default:
       return { ok: false, error: `Unknown message type: ${message.type}` };

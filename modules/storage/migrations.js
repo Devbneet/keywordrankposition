@@ -3,7 +3,7 @@
  */
 
 export const DATABASE_NAME = "dm_rank_tracker_db";
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export const STORES = Object.freeze({
   CLIENTS: "clients",
@@ -12,6 +12,7 @@ export const STORES = Object.freeze({
   JOBS: "jobs",
   RESULTS: "results",
   BACKUPS: "backups",
+  SHEET_SNAPSHOTS: "sheet_snapshots",
 });
 
 /**
@@ -49,6 +50,13 @@ export function applyIdbMigrations(db, oldVersion, _newVersion) {
       backupStore.createIndex("by_client", "clientId", { unique: false });
     }
   }
+  if (oldVersion < 2) {
+    if (!db.objectStoreNames.contains(STORES.SHEET_SNAPSHOTS)) {
+      const snapStore = db.createObjectStore(STORES.SHEET_SNAPSHOTS, { keyPath: "snapshotKey" });
+      snapStore.createIndex("by_client", "clientId", { unique: false });
+      snapStore.createIndex("by_spreadsheet", "spreadsheetId", { unique: false });
+    }
+  }
 }
 
 export const DB_SCHEMA_KEY = "dm_db_schema_version";
@@ -66,7 +74,7 @@ export async function ensureFallbackSchema(storageClient, targetVersion = CURREN
     data = {};
   }
 
-  if (currentVersion < 1) {
+  if (currentVersion < 2) {
     for (const storeName of Object.values(STORES)) {
       if (!data[storeName] || typeof data[storeName] !== "object") {
         data[storeName] = {};

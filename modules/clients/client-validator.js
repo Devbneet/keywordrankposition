@@ -10,6 +10,7 @@ import {
 } from "../location/coordinate-validator.js";
 import { normalizeDomain } from "../ranking/domain-matcher.js";
 import { SUPPORTED_SEARCH_DEPTHS } from "../ranking/ranking-state.js";
+import { validateLocationWorksheetIsolation } from "../sheets/sheet-range-validator.js";
 
 export const DEFAULT_SHEET_COLUMNS = Object.freeze({
   keywordColumn: "C",
@@ -104,41 +105,7 @@ export function validateSheetConfig({
  * (spreadsheetId, worksheetName, latestDateColumn) cell range.
  */
 export function checkLocationSheetRangeCollisions({ sheetConfig, locations = [] }) {
-  if (locations.length <= 1) {
-    return { valid: true, collisions: [] };
-  }
-
-  const spreadsheetScope = sheetConfig?.spreadsheetId || "default";
-  const hasAnyExplicitTarget =
-    Boolean(sheetConfig?.spreadsheetId) ||
-    locations.some((loc) => Boolean(loc.worksheetName || loc.reportingRange));
-  if (!hasAnyExplicitTarget) {
-    return { valid: true, collisions: [] };
-  }
-
-  const seenTargets = new Map();
-  const collisions = [];
-
-  for (const loc of locations) {
-    const override = sheetConfig?.locationSheetMappings?.[loc.locationId] || {};
-    const ws = String(loc.worksheetName || override.worksheetName || sheetConfig?.worksheetName || "Keywords").trim();
-    const dateCol = String(loc.reportingRange || override.latestDateColumn || sheetConfig?.latestDateColumn || "H").trim();
-    const key = `${spreadsheetScope}::${ws.toLowerCase()}::${dateCol.toUpperCase()}`;
-
-    if (seenTargets.has(key)) {
-      const other = seenTargets.get(key);
-      collisions.push(
-        `Locations '${other.locationName}' and '${loc.locationName}' share the same target sheet range (${ws}!${dateCol}).`
-      );
-    } else {
-      seenTargets.set(key, loc);
-    }
-  }
-
-  return {
-    valid: collisions.length === 0,
-    collisions,
-  };
+  return validateLocationWorksheetIsolation({ sheetConfig, locations });
 }
 
 export function validateClientInput({

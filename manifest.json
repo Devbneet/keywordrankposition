@@ -6,7 +6,11 @@
   "permissions": [
     "storage",
     "tabs",
-    "debugger"
+    "debugger",
+    "identity"
+  ],
+  "host_permissions": [
+    "https://sheets.googleapis.com/*"
   ],
   "background": {
     "service_worker": "background/service-worker.js",

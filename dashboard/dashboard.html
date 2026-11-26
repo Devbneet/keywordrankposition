@@ -18,7 +18,7 @@
         </div>
           <div class="meta-badges">
           <span class="version-chip">v<span id="dash-version">-</span></span>
-          <span id="dash-phase-chip" class="phase-chip">Phase 7: Multi-Client Workspace</span>
+          <span id="dash-phase-chip" class="phase-chip">Phase 8: Google Sheets Read-Only Import</span>
         </div>
       </div>
     </header>
@@ -27,12 +27,15 @@
       <section class="card clients-card">
         <div class="card-header">
           <div>
-            <h2>Clients (Phase 7)</h2>
+            <h2>Digital Minds — Clients</h2>
             <p class="muted">
               Manage agency client profiles, locations, saved keywords, and Google Sheet mappings. Switching clients resets active location verification safely.
             </p>
           </div>
-          <span id="active-client-pill" class="pill pill-neutral">No Active Client</span>
+          <div class="header-actions-inline">
+            <span id="active-client-pill" class="pill pill-neutral">No Active Client</span>
+            <button id="btn-client-new" class="btn-navy btn-compact" type="button">+ Add Client</button>
+          </div>
         </div>
 
         <div class="filter-bar">
@@ -41,7 +44,6 @@
             <input id="client-show-archived" type="checkbox" checked />
             Show archived
           </label>
-          <button id="btn-client-new" class="btn-navy btn-compact" type="button">Add Client</button>
           <label class="btn-outline btn-compact file-btn">
             Import Client JSON
             <input id="client-import-file" type="file" accept=".json" hidden />
@@ -168,14 +170,143 @@
             <table>
               <thead>
                 <tr>
-                  <th>Job ID</th>
-                  <th>Date</th>
-                  <th>Location</th>
-                  <th>Total</th>
+                  <th>Keyword</th>
+                  <th>Position</th>
                   <th>Status</th>
+                  <th>URL</th>
+                  <th>Checked</th>
+                  <th>Google Loc</th>
                 </tr>
               </thead>
               <tbody id="cli-history-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="card sheets-card">
+        <div class="card-header">
+          <div>
+            <h2>Google Sheets Integration (Phase 8 — Strictly Read-Only)</h2>
+            <p class="muted">
+              Authenticate via Chrome Identity API (<code>spreadsheets.readonly</code> scope grants read access across spreadsheets available to your signed-in account). Detects groups, headers, stats blocks, formulas, and row numbers without altering the spreadsheet.
+            </p>
+          </div>
+          <span id="sheets-auth-pill" class="pill pill-neutral">Disconnected</span>
+        </div>
+
+        <div class="context-summary-grid">
+          <div class="summary-chip">
+            <span class="summary-label">OAuth Config Status</span>
+            <span id="sheets-oauth-status" class="summary-val">Checking...</span>
+          </div>
+          <div class="summary-chip">
+            <span class="summary-label">Authentication Status</span>
+            <span id="sheets-auth-status" class="summary-val">-</span>
+          </div>
+          <div class="summary-chip">
+            <span class="summary-label">Last Connected</span>
+            <span id="sheets-last-connected" class="summary-val">Never</span>
+          </div>
+          <div class="summary-chip">
+            <span class="summary-label">Active Client Sheet</span>
+            <span id="sheets-ctx-client" class="summary-val">No Active Client</span>
+          </div>
+        </div>
+
+        <div class="button-bar" style="margin-bottom: 12px;">
+          <button id="btn-sheets-connect" class="btn-navy btn-compact" type="button">Connect Google Account</button>
+          <button id="btn-sheets-disconnect" class="btn-outline btn-compact" type="button">Disconnect Google Account</button>
+          <button id="btn-sheets-test" class="btn-outline btn-compact" type="button">Test Connection</button>
+        </div>
+
+        <div id="sheets-feedback" class="feedback-banner hidden" role="alert"></div>
+
+        <div class="location-form">
+          <div class="form-grid-3">
+            <div class="form-row">
+              <label for="sheets-url-input">Google Sheet URL (supports #gid=...)</label>
+              <input id="sheets-url-input" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0" />
+            </div>
+            <div class="form-row">
+              <label for="sheets-id-input">Spreadsheet ID</label>
+              <input id="sheets-id-input" type="text" placeholder="Auto-extracted ID" />
+            </div>
+            <div class="form-row">
+              <label for="sheets-ws-select">Worksheet (verified via API)</label>
+              <select id="sheets-ws-select">
+                <option value="">Load worksheets first...</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="button-bar">
+            <button id="btn-sheets-load-ws" class="btn-outline" type="button">Load Worksheets</button>
+            <button id="btn-sheets-preview" class="btn-primary" type="button">Preview &amp; Read Sheet</button>
+            <button id="btn-sheets-refresh" class="btn-outline" type="button">Refresh &amp; Compare</button>
+            <button id="btn-sheets-confirm-import" class="btn-navy" type="button" disabled>Confirm Import Keywords Locally</button>
+          </div>
+        </div>
+
+        <div id="sheets-preview-panel" class="status-panel hidden">
+          <h3 id="sheets-preview-heading">Spreadsheet Structure Preview</h3>
+          <div class="metrics-grid">
+            <div class="summary-chip">
+              <span class="summary-label">Total Keyword Rows</span>
+              <span id="sh-m-total" class="summary-val">0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Detected Groups</span>
+              <span id="sh-m-groups" class="summary-val">-</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Header Rows</span>
+              <span id="sh-m-headers" class="summary-val">-</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Separator Rows</span>
+              <span id="sh-m-separators" class="summary-val">-</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Latest Date Col</span>
+              <span id="sh-m-latest-date" class="summary-val">-</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">History Columns</span>
+              <span id="sh-m-history-cols" class="summary-val">0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Formulas / Merges</span>
+              <span id="sh-m-meta" class="summary-val">0 / 0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Skipped / Warnings</span>
+              <span id="sh-m-warnings" class="summary-val">0</span>
+            </div>
+          </div>
+
+          <div id="sheets-sync-diff-banner" class="feedback-banner hidden"></div>
+          <label id="sheets-ambiguous-confirm-row" class="checkbox-inline hidden" style="margin: 8px 0;">
+            <input id="sheets-ambiguous-confirm-chk" type="checkbox" />
+            I confirm these detected rows represent the client keywords (structure was ambiguous).
+          </label>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Exclude</th>
+                  <th>Row #</th>
+                  <th>Keyword</th>
+                  <th>Volume</th>
+                  <th>Competition</th>
+                  <th>Landing Page</th>
+                  <th>SERP URL</th>
+                  <th>Latest Rank</th>
+                  <th>Group</th>
+                </tr>
+              </thead>
+              <tbody id="sheets-preview-tbody"></tbody>
             </table>
           </div>
         </div>
@@ -743,9 +874,14 @@
           <div class="form-row">
             <div class="action-group-header">
               <label for="bulk-keywords">Keywords (one per line; duplicate rows preserved)</label>
-              <button id="btn-bulk-import-lab" class="btn-link" type="button">
-                Import from Accuracy Lab
-              </button>
+              <div class="actions">
+                <button id="btn-bulk-import-sheets" class="btn-link" type="button">
+                  Load from Google Sheets
+                </button>
+                <button id="btn-bulk-import-lab" class="btn-link" type="button">
+                  Import from Accuracy Lab
+                </button>
+              </div>
             </div>
             <textarea
               id="bulk-keywords"
@@ -947,11 +1083,16 @@
               <tr>
                 <td>Phase 7</td>
                 <td>Multiple client configuration &amp; management</td>
+                <td><span class="pill pill-healthy">Completed</span></td>
+              </tr>
+              <tr>
+                <td>Phase 8</td>
+                <td>Google Sheets authentication, reading &amp; keyword import</td>
                 <td><span class="pill pill-healthy">Current</span></td>
               </tr>
               <tr>
-                <td>Phases 8–12</td>
-                <td>Google Sheets, history, scheduling &amp; deployment</td>
+                <td>Phases 9–12</td>
+                <td>Google Sheets updating, history, scheduling &amp; deployment</td>
                 <td><span class="pill pill-neutral">Pending</span></td>
               </tr>
             </tbody>

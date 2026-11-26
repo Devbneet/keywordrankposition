@@ -35,6 +35,8 @@ function getKeyFieldForStore(storeName) {
       return "recordKey";
     case STORES.BACKUPS:
       return "backupId";
+    case STORES.SHEET_SNAPSHOTS:
+      return "snapshotKey";
     default:
       return "id";
   }
@@ -141,6 +143,7 @@ export function createDatabase({
       by_job: "jobId",
       by_status: "status",
       by_name: "clientName",
+      by_spreadsheet: "spreadsheetId",
     };
     const field = fieldMap[indexName] || indexName;
     return all.filter((item) => item?.[field] === indexValue);

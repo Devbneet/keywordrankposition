@@ -122,12 +122,19 @@ export function buildKeywordQueue({
       const keyword = String(isObj ? entry.keyword : entry || "").trim();
       if (!keyword) return null;
       const rowPosition = isObj && Number.isInteger(entry.rowPosition) ? entry.rowPosition : idx + 1;
+      const rowNumber = isObj && Number.isInteger(entry.rowNumber) ? entry.rowNumber : rowPosition;
 
       return {
         taskId: `${jobId}_t${idx + 1}_r${rowPosition}`,
         jobId,
         sequenceIndex: idx,
         rowPosition,
+        rowNumber,
+        keywordId: isObj ? entry.keywordId || null : null,
+        spreadsheetId: isObj ? entry.spreadsheetId || null : null,
+        worksheetId: isObj ? entry.worksheetId || null : null,
+        worksheetName: isObj ? entry.worksheetName || null : null,
+        keywordGroup: isObj ? entry.keywordGroup || null : null,
         keyword,
         clientDomain,
         locationConfig: locationConfig ? { ...locationConfig } : null,

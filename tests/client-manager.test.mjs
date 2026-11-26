@@ -131,7 +131,7 @@ test("location validation rejects bad coordinates and detects sheet worksheet/co
     reportingRange: "H",
   });
   assert.equal(locCollision.ok, false);
-  assert.match(locCollision.errors[0], /share the same target sheet range/i);
+  assert.match(locCollision.errors[0], /overlap on worksheet|share the same target sheet range/i);
 });
 
 test("keyword manager preserves duplicate keywords from paste/CSV and exports/imports client JSON", async () => {

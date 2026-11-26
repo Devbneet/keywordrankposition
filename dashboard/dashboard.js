@@ -239,6 +239,44 @@ const cliAddKwsBtn = document.getElementById("btn-cli-add-kws");
 const cliKwCsvFileInput = document.getElementById("cli-kw-csv-file");
 const cliKeywordsListEl = document.getElementById("cli-keywords-list");
 const cliHistoryTbody = document.getElementById("cli-history-tbody");
+
+// Google Sheets Integration controls (Phase 8 — Read-Only)
+const sheetsAuthPillEl = document.getElementById("sheets-auth-pill");
+const sheetsOauthStatusEl = document.getElementById("sheets-oauth-status");
+const sheetsAuthStatusEl = document.getElementById("sheets-auth-status");
+const sheetsLastConnectedEl = document.getElementById("sheets-last-connected");
+const sheetsCtxClientEl = document.getElementById("sheets-ctx-client");
+const sheetsConnectBtn = document.getElementById("btn-sheets-connect");
+const sheetsDisconnectBtn = document.getElementById("btn-sheets-disconnect");
+const sheetsTestBtn = document.getElementById("btn-sheets-test");
+const sheetsFeedbackEl = document.getElementById("sheets-feedback");
+
+const sheetsUrlInput = document.getElementById("sheets-url-input");
+const sheetsIdInput = document.getElementById("sheets-id-input");
+const sheetsWsSelect = document.getElementById("sheets-ws-select");
+const sheetsLoadWsBtn = document.getElementById("btn-sheets-load-ws");
+const sheetsPreviewBtn = document.getElementById("btn-sheets-preview");
+const sheetsRefreshBtn = document.getElementById("btn-sheets-refresh");
+const sheetsConfirmImportBtn = document.getElementById("btn-sheets-confirm-import");
+
+const sheetsPreviewPanel = document.getElementById("sheets-preview-panel");
+const sheetsPreviewHeadingEl = document.getElementById("sheets-preview-heading");
+const shMTotalEl = document.getElementById("sh-m-total");
+const shMGroupsEl = document.getElementById("sh-m-groups");
+const shMHeadersEl = document.getElementById("sh-m-headers");
+const shMSeparatorsEl = document.getElementById("sh-m-separators");
+const shMLatestDateEl = document.getElementById("sh-m-latest-date");
+const shMHistoryColsEl = document.getElementById("sh-m-history-cols");
+const shMMetaEl = document.getElementById("sh-m-meta");
+const shMWarningsEl = document.getElementById("sh-m-warnings");
+const sheetsSyncDiffBannerEl = document.getElementById("sheets-sync-diff-banner");
+const sheetsAmbiguousConfirmRow = document.getElementById("sheets-ambiguous-confirm-row");
+const sheetsAmbiguousConfirmChk = document.getElementById("sheets-ambiguous-confirm-chk");
+const sheetsPreviewTbody = document.getElementById("sheets-preview-tbody");
+const bulkImportSheetsBtn = document.getElementById("btn-bulk-import-sheets");
+
+let latestSheetReadResult = null;
+let excludedSheetRows = new Set();
 let validationState = {
   tolerance: 1,
   deviceType: "Desktop",
@@ -1423,6 +1461,7 @@ function renderClientWorkspace(workspace) {
     activeClientPillEl.className = "pill pill-neutral";
     activeClientPillEl.textContent = "No Active Client";
     activeClientWorkspaceEl.classList.add("hidden");
+    sheetsCtxClientEl.textContent = "No Active Client";
     return;
   }
 
@@ -1431,6 +1470,16 @@ function renderClientWorkspace(workspace) {
   activeClientPillEl.textContent = `Active: ${client.clientName}`;
   wsClientHeadingEl.textContent = `${client.clientName} (${client.websiteDomain})`;
   activeClientWorkspaceEl.classList.remove("hidden");
+
+  sheetsCtxClientEl.textContent = client.sheetConfig?.spreadsheetId
+    ? `${client.clientName} (${client.sheetConfig.worksheetName || "Select tab"})`
+    : `${client.clientName} (No Sheet URL configured)`;
+  if (client.sheetConfig?.sheetUrl) {
+    sheetsUrlInput.value = client.sheetConfig.sheetUrl;
+  }
+  if (client.sheetConfig?.spreadsheetId) {
+    sheetsIdInput.value = client.sheetConfig.spreadsheetId;
+  }
 
   rankDomainInput.value = client.websiteDomain || "";
   if (selectedLocation) {
@@ -1566,6 +1615,12 @@ function renderClientWorkspace(workspace) {
   }
 }
 
+function getClientInitials(name) {
+  const parts = String(name || "DM").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+}
+
 function renderClientCards(overviews = []) {
   clientOverviewsCache = overviews;
   clientCardsGridEl.replaceChildren();
@@ -1574,7 +1629,7 @@ function renderClientCards(overviews = []) {
   if (overviews.length === 0) {
     const empty = document.createElement("div");
     empty.className = "muted";
-    empty.textContent = "No clients match the filter. Click Add Client to create one.";
+    empty.textContent = "No clients match the filter. Click + Add Client to create one.";
     clientCardsGridEl.appendChild(empty);
     return;
   }
@@ -1584,7 +1639,14 @@ function renderClientCards(overviews = []) {
     card.className = `client-overview-card${ov.clientId === activeId ? " active-card" : ""}`;
 
     const head = document.createElement("div");
-    head.className = "card-header-row";
+    head.className = "client-card-head";
+
+    const identity = document.createElement("div");
+    identity.className = "client-card-identity";
+    const avatar = document.createElement("div");
+    avatar.className = "client-avatar";
+    avatar.textContent = getClientInitials(ov.clientName);
+
     const titleWrap = document.createElement("div");
     const strong = document.createElement("strong");
     strong.textContent = ov.clientName;
@@ -1592,40 +1654,86 @@ function renderClientCards(overviews = []) {
     domainDiv.className = "muted";
     domainDiv.textContent = ov.websiteDomain;
     titleWrap.append(strong, domainDiv);
+    identity.append(avatar, titleWrap);
 
-    const statusPill = document.createElement("span");
-    statusPill.className = `pill ${
-      ov.status === "active" ? "pill-healthy" : ov.status === "archived" ? "pill-neutral" : "pill-pending"
-    }`;
-    statusPill.textContent = ov.status;
-    head.append(titleWrap, statusPill);
+    const rightHead = document.createElement("div");
+    rightHead.className = "actions";
+    if (ov.status !== "active") {
+      const statusPill = document.createElement("span");
+      statusPill.className = `pill ${ov.status === "archived" ? "pill-neutral" : "pill-pending"}`;
+      statusPill.textContent = ov.status;
+      rightHead.appendChild(statusPill);
+    }
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.className = "btn-outline btn-compact";
+    moreBtn.title = "Client actions";
+    moreBtn.textContent = "···";
+    rightHead.appendChild(moreBtn);
+    head.append(identity, rightHead);
 
-    const meta = document.createElement("div");
-    meta.className = "client-card-meta";
-    const metaPairs = [
-      `Keywords: ${ov.keywordCount}`,
-      `Locations: ${ov.locationCount}`,
-      `Top 3: ${ov.hasRankingData ? ov.top3Count : "No data"}`,
-      `Top 10: ${ov.hasRankingData ? ov.top10Count : "No data"}`,
-      `Top 20: ${ov.hasRankingData ? ov.top20Count : "No data"}`,
-      `Sheet: ${ov.sheetConfigStatus}`,
-      `Last Check: ${formatClientTimestamp(ov.lastRankingCheck)}`,
-      `Last Job: ${ov.lastJobStatus || "No data"}`,
+    const kpiRow = document.createElement("div");
+    kpiRow.className = "client-kpis-row";
+
+    const kpiDefs = [
+      { label: "Keywords", value: String(ov.keywordCount), good: false },
+      { label: "Locations", value: String(ov.locationCount), good: false },
+      {
+        label: "Top 10",
+        value: ov.hasRankingData ? String(ov.top10Count) : "No data",
+        good: Boolean(ov.hasRankingData && ov.top10Count > 0),
+      },
     ];
-    for (const text of metaPairs) {
-      const span = document.createElement("span");
-      span.textContent = text;
-      meta.appendChild(span);
+    for (const kpi of kpiDefs) {
+      const box = document.createElement("div");
+      const lbl = document.createElement("span");
+      lbl.className = "client-kpi-label";
+      lbl.textContent = kpi.label;
+      const val = document.createElement("span");
+      val.className = `client-kpi-value${kpi.good ? " kpi-good" : ""}`;
+      val.textContent = kpi.value;
+      box.append(lbl, val);
+      kpiRow.appendChild(box);
     }
 
-    const actions = document.createElement("div");
-    actions.className = "actions";
+    const locLine = document.createElement("div");
+    locLine.className = "client-card-locations";
+    const locSummary =
+      Array.isArray(ov.locationNames) && ov.locationNames.length > 0
+        ? ov.locationNames.join(", ")
+        : "No locations configured";
+    locLine.textContent = `⌖ ${locSummary}`;
 
-    const selectBtn = document.createElement("button");
-    selectBtn.type = "button";
-    selectBtn.className = "btn-navy btn-compact";
-    selectBtn.textContent = ov.clientId === activeId ? "Selected" : "Select";
-    selectBtn.addEventListener("click", () => handleSelectClient(ov.clientId));
+    const primaryActions = document.createElement("div");
+    primaryActions.className = "client-card-primary-actions";
+
+    const manageBtn = document.createElement("button");
+    manageBtn.type = "button";
+    manageBtn.className = "btn-outline";
+    manageBtn.textContent = ov.clientId === activeId ? "Managing Client" : "Manage Client";
+    manageBtn.addEventListener("click", async () => {
+      await handleSelectClient(ov.clientId);
+      activeClientWorkspaceEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+
+    const startCheckBtn = document.createElement("button");
+    startCheckBtn.type = "button";
+    startCheckBtn.className = "btn-navy";
+    startCheckBtn.textContent = "Start Ranking Check";
+    startCheckBtn.addEventListener("click", async () => {
+      await handleSelectClient(ov.clientId);
+      if ((activeClientWorkspace?.keywords || []).length > 0) {
+        clientLoadBulkBtn.click();
+      }
+      bulkKeywordsInput.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    primaryActions.append(manageBtn, startCheckBtn);
+
+    const overflowMenu = document.createElement("div");
+    overflowMenu.className = "client-card-menu hidden";
+    moreBtn.addEventListener("click", () => {
+      overflowMenu.classList.toggle("hidden");
+    });
 
     const editBtn = document.createElement("button");
     editBtn.type = "button";
@@ -1698,8 +1806,8 @@ function renderClientCards(overviews = []) {
       }
     });
 
-    actions.append(selectBtn, editBtn, dupBtn, archBtn, delBtn);
-    card.append(head, meta, actions);
+    overflowMenu.append(editBtn, dupBtn, archBtn, delBtn);
+    card.append(head, kpiRow, locLine, primaryActions, overflowMenu);
     clientCardsGridEl.appendChild(card);
   }
 }
@@ -1926,6 +2034,10 @@ clientLoadBulkBtn.addEventListener("click", () => {
     keywordId: k.keywordId,
     keywordGroup: k.keywordGroup,
     rowPosition: k.rowPosition,
+    rowNumber: k.rowNumber ?? k.rowPosition,
+    spreadsheetId: k.spreadsheetId || null,
+    worksheetId: k.worksheetId || null,
+    worksheetName: k.worksheetName || null,
     landingPage: k.landingPage,
     searchVolume: k.searchVolume,
     competition: k.competition,
@@ -1935,6 +2047,316 @@ clientLoadBulkBtn.addEventListener("click", () => {
     clientFeedbackEl,
     "success",
     `Loaded ${parsedBulkQueueInput.length} keyword(s) from '${activeClientWorkspace.client.clientName}' into Bulk Keyword Checker.`
+  );
+});
+
+bulkImportSheetsBtn.addEventListener("click", () => {
+  if (!activeClientWorkspace?.client) {
+    showBanner(bulkFeedbackEl, "error", "Select a client first to load Google Sheets keywords.");
+    return;
+  }
+  const sheetKeywords = (activeClientWorkspace.keywords || []).filter(
+    (k) => k.source === "google_sheets" && k.active !== false && !k.excluded
+  );
+  if (sheetKeywords.length === 0) {
+    showBanner(
+      bulkFeedbackEl,
+      "error",
+      "No imported Google Sheets keywords found for this client. Use Google Sheets Integration -> Preview & Confirm Import first."
+    );
+    return;
+  }
+  parsedBulkQueueInput = sheetKeywords.map((k) => ({
+    keyword: k.keyword,
+    keywordId: k.keywordId,
+    keywordGroup: k.keywordGroup,
+    rowPosition: k.rowNumber ?? k.rowPosition,
+    rowNumber: k.rowNumber ?? k.rowPosition,
+    spreadsheetId: k.spreadsheetId,
+    worksheetId: k.worksheetId,
+    worksheetName: k.worksheetName,
+    landingPage: k.landingPage,
+    searchVolume: k.searchVolume,
+    competition: k.competition,
+  }));
+  bulkKeywordsInput.value = parsedBulkQueueInput.map((k) => k.keyword).join("\n");
+  showBanner(
+    bulkFeedbackEl,
+    "success",
+    `Loaded ${parsedBulkQueueInput.length} Google Sheet keyword(s) with row anchors into Bulk Keyword Checker.`
+  );
+});
+
+// Phase 8 Google Sheets Integration (Read-Only) UI handlers
+async function refreshGoogleAuthStatus() {
+  try {
+    const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SHEETS_GET_AUTH_STATUS });
+    if (!res?.ok) return;
+    sheetsOauthStatusEl.textContent = res.oauthConfigured
+      ? "Configured (spreadsheets.readonly)"
+      : "OAuth Client ID not configured";
+    sheetsAuthStatusEl.textContent = res.status || "Disconnected";
+    sheetsLastConnectedEl.textContent = res.lastConnectedAt
+      ? new Date(res.lastConnectedAt).toLocaleString()
+      : "Never";
+
+    sheetsAuthPillEl.className = "pill";
+    if (res.status === "Connected") {
+      sheetsAuthPillEl.classList.add("pill-healthy");
+    } else if (res.status === "OAuth not configured" || res.status === "Disconnected") {
+      sheetsAuthPillEl.classList.add("pill-neutral");
+    } else {
+      sheetsAuthPillEl.classList.add("pill-error");
+    }
+    sheetsAuthPillEl.textContent = res.status || "Disconnected";
+
+    if (res.lastError) {
+      showBanner(sheetsFeedbackEl, res.oauthConfigured ? "warning" : "error", res.lastError);
+    } else {
+      showBanner(sheetsFeedbackEl, null, "");
+    }
+  } catch {
+    // Ignore initial auth check errors.
+  }
+}
+
+sheetsConnectBtn.addEventListener("click", async () => {
+  showBanner(sheetsFeedbackEl, null, "");
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SHEETS_CONNECT });
+  await refreshGoogleAuthStatus();
+  if (res?.ok) {
+    showBanner(sheetsFeedbackEl, "success", "Google account connected (strictly read-only scope).");
+  } else {
+    showBanner(sheetsFeedbackEl, "error", res?.error || "Unable to connect Google account.");
+  }
+});
+
+sheetsDisconnectBtn.addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SHEETS_DISCONNECT });
+  await refreshGoogleAuthStatus();
+  showBanner(sheetsFeedbackEl, "warning", "Disconnected Google account token from Chrome cache.");
+});
+
+sheetsTestBtn.addEventListener("click", async () => {
+  showBanner(sheetsFeedbackEl, null, "");
+  const spreadsheetId = sheetsIdInput.value.trim();
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.SHEETS_TEST_CONNECTION,
+    payload: { spreadsheetId },
+  });
+  await refreshGoogleAuthStatus();
+  if (res?.ok) {
+    showBanner(
+      sheetsFeedbackEl,
+      "success",
+      res.spreadsheetTitle
+        ? `Connected! Verified read access to '${res.spreadsheetTitle}'.`
+        : res.message || "Google OAuth connection verified."
+    );
+  } else {
+    showBanner(sheetsFeedbackEl, "error", res?.error || "Google Sheets connection test failed.");
+  }
+});
+
+sheetsUrlInput.addEventListener("input", () => {
+  const m = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/.exec(sheetsUrlInput.value.trim());
+  if (m) {
+    sheetsIdInput.value = m[1];
+  }
+});
+
+sheetsLoadWsBtn.addEventListener("click", async () => {
+  showBanner(sheetsFeedbackEl, null, "");
+  const sheetUrlOrId = sheetsUrlInput.value.trim() || sheetsIdInput.value.trim();
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.SHEETS_LIST_WORKSHEETS,
+    payload: { sheetUrlOrId },
+  });
+  if (!res?.ok) {
+    showBanner(sheetsFeedbackEl, "error", res?.error || "Failed loading worksheets.");
+    return;
+  }
+  sheetsIdInput.value = res.spreadsheetId;
+  sheetsWsSelect.replaceChildren();
+  for (const ws of res.worksheets || []) {
+    const opt = document.createElement("option");
+    opt.value = ws.sheetId;
+    opt.textContent = `${ws.title} (gid=${ws.sheetId})`;
+    if (res.urlGid && ws.sheetId === res.urlGid) {
+      opt.selected = true;
+    } else if (
+      activeClientWorkspace?.client?.sheetConfig?.worksheetId &&
+      ws.sheetId === activeClientWorkspace.client.sheetConfig.worksheetId
+    ) {
+      opt.selected = true;
+    }
+    sheetsWsSelect.appendChild(opt);
+  }
+  showBanner(
+    sheetsFeedbackEl,
+    "success",
+    `Loaded ${res.worksheets.length} worksheet(s) from '${res.spreadsheetTitle}'.`
+  );
+});
+
+function renderSpreadsheetPreview(readRes) {
+  latestSheetReadResult = readRes;
+  const p = readRes.preview;
+  excludedSheetRows = new Set(
+    (readRes.importedKeywords || []).filter((k) => k.excluded).map((k) => k.rowNumber)
+  );
+
+  sheetsPreviewPanel.classList.remove("hidden");
+  sheetsPreviewHeadingEl.textContent = `${p.spreadsheetTitle || p.spreadsheetId} — ${p.worksheetName} (${p.locale || "locale ?"})`;
+  shMTotalEl.textContent = String(p.totalKeywordRows);
+  shMGroupsEl.textContent = p.detectedGroups.length > 0 ? `${p.detectedGroups.length} (${p.detectedGroups.join(", ")})` : "None";
+  shMHeadersEl.textContent = p.headerRows.join(", ") || "None";
+  shMSeparatorsEl.textContent = p.separatorRows.join(", ") || "None";
+  shMLatestDateEl.textContent = p.latestRankingDate || "-";
+  shMHistoryColsEl.textContent = String((p.historicalColumns || []).length);
+  shMMetaEl.textContent = `${p.formulaCellCount} / ${p.mergedRangeCount}`;
+  shMWarningsEl.textContent = `${p.skippedRows.length} / ${p.warnings.length}`;
+
+  if (p.isAmbiguous) {
+    sheetsAmbiguousConfirmRow.classList.remove("hidden");
+    sheetsAmbiguousConfirmChk.checked = false;
+  } else {
+    sheetsAmbiguousConfirmRow.classList.add("hidden");
+    sheetsAmbiguousConfirmChk.checked = true;
+  }
+
+  const diff = readRes.syncDiff;
+  if (diff && !diff.isInitialImport) {
+    const parts = [
+      `Added: ${diff.added.length}`,
+      `Removed: ${diff.removed.length}`,
+      `Edited: ${diff.editedKeywords.length}`,
+      `Moved Rows: ${diff.movedRows.length}`,
+      `Landing Page Changes: ${diff.changedLandingPages.length}`,
+      diff.structureChanged ? "STRUCTURE CHANGED!" : "Structure matched",
+    ];
+    showBanner(
+      sheetsSyncDiffBannerEl,
+      diff.hasChanges || diff.structureChanged ? "warning" : "success",
+      `Sync Diff vs Saved Keywords — ${parts.join(" · ")}`
+    );
+  } else {
+    showBanner(sheetsSyncDiffBannerEl, null, "");
+  }
+
+  sheetsPreviewTbody.replaceChildren();
+  for (const row of p.previewRows || []) {
+    const tr = document.createElement("tr");
+    const chkTd = document.createElement("td");
+    const chk = document.createElement("input");
+    chk.type = "checkbox";
+    chk.checked = Boolean(row.excluded);
+    chk.addEventListener("change", () => {
+      if (chk.checked) {
+        excludedSheetRows.add(row.rowNumber);
+      } else {
+        excludedSheetRows.delete(row.rowNumber);
+      }
+    });
+    chkTd.appendChild(chk);
+    tr.appendChild(chkTd);
+
+    const cells = [
+      String(row.rowNumber),
+      row.keyword,
+      row.searchVolume || "-",
+      row.competition || "-",
+      row.landingPage || "-",
+      row.serpUrl || "-",
+      row.latestRank || "-",
+      row.keywordGroup || "-",
+    ];
+    for (const val of cells) {
+      const td = document.createElement("td");
+      td.textContent = val;
+      tr.appendChild(td);
+    }
+    sheetsPreviewTbody.appendChild(tr);
+  }
+
+  sheetsConfirmImportBtn.disabled = (p.previewRows || []).length === 0;
+}
+
+async function runSheetPreviewRead() {
+  showBanner(sheetsFeedbackEl, null, "");
+  if (!activeClientWorkspace?.client) {
+    showBanner(sheetsFeedbackEl, "error", "Select an active client before reading a Google Sheet.");
+    return;
+  }
+  const selectedOpt = sheetsWsSelect.options[sheetsWsSelect.selectedIndex];
+  const wsTitleClean = selectedOpt?.value
+    ? selectedOpt.textContent.replace(/\s*\(gid=.*\)$/, "")
+    : activeClientWorkspace.client.sheetConfig?.worksheetName || "";
+
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.SHEETS_PREVIEW_AND_READ,
+    payload: {
+      clientId: activeClientWorkspace.client.clientId,
+      locationId: activeClientWorkspace.selectedLocation?.locationId || null,
+      sheetUrlOrId: sheetsUrlInput.value.trim() || sheetsIdInput.value.trim(),
+      worksheetId: sheetsWsSelect.value || activeClientWorkspace.client.sheetConfig?.worksheetId || "",
+      worksheetName: wsTitleClean,
+      excludedRowNumbers: [...excludedSheetRows],
+    },
+  });
+
+  if (!res?.ok) {
+    showBanner(sheetsFeedbackEl, "error", res?.error || "Failed reading Google Sheet.");
+    return;
+  }
+
+  renderSpreadsheetPreview(res);
+  showBanner(
+    sheetsFeedbackEl,
+    res.preview.warnings.length > 0 ? "warning" : "success",
+    `Read ${res.preview.totalKeywordRows} keyword row(s) from '${res.worksheet.title}' cleanly (read-only).`
+  );
+}
+
+sheetsPreviewBtn.addEventListener("click", runSheetPreviewRead);
+sheetsRefreshBtn.addEventListener("click", runSheetPreviewRead);
+
+sheetsConfirmImportBtn.addEventListener("click", async () => {
+  if (!latestSheetReadResult || !activeClientWorkspace?.client) return;
+  if (latestSheetReadResult.preview.isAmbiguous && !sheetsAmbiguousConfirmChk.checked) {
+    showBanner(
+      sheetsFeedbackEl,
+      "error",
+      "Check the ambiguous-structure confirmation box before importing."
+    );
+    return;
+  }
+
+  const finalKeywords = (latestSheetReadResult.importedKeywords || []).map((k) => {
+    const isExcluded = excludedSheetRows.has(k.rowNumber);
+    return { ...k, excluded: isExcluded, active: !isExcluded };
+  });
+
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.SHEETS_APPLY_CONFIRMED_SYNC,
+    payload: {
+      clientId: activeClientWorkspace.client.clientId,
+      incomingKeywords: finalKeywords,
+      snapshot: latestSheetReadResult.snapshot,
+      confirmed: true,
+    },
+  });
+  if (!res?.ok) {
+    showBanner(sheetsFeedbackEl, "error", res?.error || "Failed saving imported sheet keywords.");
+    return;
+  }
+
+  await refreshClientWorkspace(activeClientWorkspace.client.clientId);
+  await refreshClientsOverview();
+  showBanner(
+    sheetsFeedbackEl,
+    "success",
+    `Saved ${res.savedCount} Google Sheet keyword row(s) and structure snapshot locally.`
   );
 });
 
@@ -1995,6 +2417,7 @@ document.addEventListener("DOMContentLoaded", () => {
   versionEl.textContent = chrome.runtime.getManifest().version || "0.1.0";
   runDashboardHealthCheck();
   refreshClientsOverview({ preserveWorkspace: true });
+  refreshGoogleAuthStatus();
   refreshLocationStatus({ populateInputs: true });
   refreshRankingState();
   refreshValidationState();
