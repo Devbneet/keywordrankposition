@@ -60,11 +60,11 @@ export function normalizeHistoryRecord(raw = {}) {
     landingPage: cleanRaw.landingPage || "",
     spreadsheetRowRef: cleanRaw.spreadsheetRowRef || (cleanRaw.rowNumber || cleanRaw.rowPosition
       ? {
-          spreadsheetId: cleanRaw.spreadsheetId || null,
-          worksheetId: cleanRaw.worksheetId ?? null,
-          worksheetName: cleanRaw.worksheetName || null,
-          rowNumber: cleanRaw.rowNumber ?? cleanRaw.rowPosition,
-        }
+        spreadsheetId: cleanRaw.spreadsheetId || null,
+        worksheetId: cleanRaw.worksheetId ?? null,
+        worksheetName: cleanRaw.worksheetName || null,
+        rowNumber: cleanRaw.rowNumber ?? cleanRaw.rowPosition,
+      }
       : null),
     jobId: cleanRaw.jobId || null,
     taskId: cleanRaw.taskId || null,
