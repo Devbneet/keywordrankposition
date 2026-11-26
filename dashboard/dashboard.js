@@ -188,6 +188,57 @@ let latestRankingState = null;
 let latestBulkState = { job: null, tasks: [], isBusy: false };
 let bulkPollTimer = null;
 let parsedBulkQueueInput = null;
+let activeClientWorkspace = null;
+let clientOverviewsCache = [];
+
+// Clients UI controls (Phase 7)
+const activeClientPillEl = document.getElementById("active-client-pill");
+const clientSearchInput = document.getElementById("client-search-input");
+const clientShowArchivedChk = document.getElementById("client-show-archived");
+const clientNewBtn = document.getElementById("btn-client-new");
+const clientImportFileInput = document.getElementById("client-import-file");
+const clientExportBtn = document.getElementById("btn-client-export");
+const clientFeedbackEl = document.getElementById("client-feedback");
+const clientCardsGridEl = document.getElementById("client-cards-grid");
+
+const clientEditorPanel = document.getElementById("client-editor-panel");
+const clientEditorTitleEl = document.getElementById("client-editor-title");
+const clientEditorForm = document.getElementById("client-editor-form");
+const cliIdInput = document.getElementById("cli-id");
+const cliNameInput = document.getElementById("cli-name");
+const cliDomainInput = document.getElementById("cli-domain");
+const cliStatusSelect = document.getElementById("cli-status");
+const cliUrlInput = document.getElementById("cli-url");
+const cliNotesInput = document.getElementById("cli-notes");
+const cliSheetUrlInput = document.getElementById("cli-sheet-url");
+const cliSheetIdInput = document.getElementById("cli-sheet-id");
+const cliWsNameInput = document.getElementById("cli-ws-name");
+const cliWsIdInput = document.getElementById("cli-ws-id");
+const cliColKwInput = document.getElementById("cli-col-kw");
+const cliColVolInput = document.getElementById("cli-col-vol");
+const cliColCompInput = document.getElementById("cli-col-comp");
+const cliColLpInput = document.getElementById("cli-col-lp");
+const cliColSerpInput = document.getElementById("cli-col-serp");
+const cliColDateInput = document.getElementById("cli-col-date");
+const clientCancelBtn = document.getElementById("btn-client-cancel");
+
+const activeClientWorkspaceEl = document.getElementById("active-client-workspace");
+const wsClientHeadingEl = document.getElementById("ws-client-heading");
+const clientBackupBtn = document.getElementById("btn-client-backup");
+const clientLoadBulkBtn = document.getElementById("btn-client-load-bulk");
+const cliLocationsListEl = document.getElementById("cli-locations-list");
+const cliLocNameInput = document.getElementById("cli-loc-name");
+const cliLocCoordsInput = document.getElementById("cli-loc-coords");
+const cliLocStateInput = document.getElementById("cli-loc-state");
+const cliLocWsInput = document.getElementById("cli-loc-ws");
+const cliLocColInput = document.getElementById("cli-loc-col");
+const cliAddLocBtn = document.getElementById("btn-cli-add-loc");
+const cliKwCountEl = document.getElementById("cli-kw-count");
+const cliKwPasteInput = document.getElementById("cli-kw-paste");
+const cliAddKwsBtn = document.getElementById("btn-cli-add-kws");
+const cliKwCsvFileInput = document.getElementById("cli-kw-csv-file");
+const cliKeywordsListEl = document.getElementById("cli-keywords-list");
+const cliHistoryTbody = document.getElementById("cli-history-tbody");
 let validationState = {
   tolerance: 1,
   deviceType: "Desktop",
@@ -977,6 +1028,8 @@ bulkStartBtn.addEventListener("click", async () => {
     const response = await chrome.runtime.sendMessage({
       type: MESSAGE_TYPES.BULK_START,
       payload: {
+        clientId: activeClientWorkspace?.client?.clientId || null,
+        locationId: activeClientWorkspace?.selectedLocation?.locationId || null,
         websiteDomain: rankDomainInput.value,
         keywords: entries,
         searchDepth: Number(rankDepthSelect.value),
@@ -995,6 +1048,7 @@ bulkStartBtn.addEventListener("click", async () => {
     showBanner(bulkFeedbackEl, "error", error instanceof Error ? error.message : "Bulk job failed.");
   } finally {
     await refreshBulkStatus();
+    await refreshClientsOverview({ preserveWorkspace: true });
   }
 });
 
@@ -1014,6 +1068,7 @@ bulkResumeBtn.addEventListener("click", async () => {
     showBanner(bulkFeedbackEl, "error", res?.error || "Unable to resume bulk job.");
   }
   await refreshBulkStatus();
+  await refreshClientsOverview({ preserveWorkspace: true });
 });
 
 bulkStopBtn.addEventListener("click", async () => {
@@ -1033,6 +1088,7 @@ bulkRetryBtn.addEventListener("click", async () => {
     showBanner(bulkFeedbackEl, "error", res?.error || "Retry failed.");
   }
   await refreshBulkStatus();
+  await refreshClientsOverview({ preserveWorkspace: true });
 });
 
 bulkExportBtn.addEventListener("click", () => {
@@ -1316,6 +1372,621 @@ clearRankingBtn.addEventListener("click", async () => {
   renderRankingResult(null);
 });
 
+function formatClientTimestamp(iso) {
+  if (!iso) return "No data";
+  const dt = new Date(iso);
+  return Number.isNaN(dt.getTime()) ? "No data" : dt.toLocaleString();
+}
+
+function populateClientEditorForm(client = null) {
+  cliIdInput.value = client?.clientId || "";
+  cliNameInput.value = client?.clientName || "";
+  cliDomainInput.value = client?.websiteDomain || "";
+  cliStatusSelect.value = client?.status || "active";
+  cliUrlInput.value = client?.websiteUrl || "";
+  cliNotesInput.value = client?.notes || "";
+  const sc = client?.sheetConfig || {};
+  cliSheetUrlInput.value = sc.sheetUrl || "";
+  cliSheetIdInput.value = sc.spreadsheetId || "";
+  cliWsNameInput.value = sc.worksheetName || "Keywords";
+  cliWsIdInput.value = sc.worksheetId || "";
+  cliColKwInput.value = sc.keywordColumn || "C";
+  cliColVolInput.value = sc.searchVolumeColumn || "D";
+  cliColCompInput.value = sc.competitionColumn || "E";
+  cliColLpInput.value = sc.landingPageColumn || "F";
+  cliColSerpInput.value = sc.serpColumn || "G";
+  cliColDateInput.value = sc.latestDateColumn || "H";
+  clientEditorTitleEl.textContent = client ? `Edit Client: ${client.clientName}` : "Add Client";
+}
+
+function applyLocationRecordToInputs(loc) {
+  if (!loc) return;
+  locNameInput.value = loc.locationName || "";
+  locCityInput.value = loc.targetCity || loc.locationName || "";
+  locLatInput.value = String(loc.latitude ?? "");
+  locLngInput.value = String(loc.longitude ?? "");
+  locAccuracyInput.value = String(loc.accuracy ?? 20);
+  if (loc.country) locCountrySelect.value = loc.country;
+  if (loc.language) locLanguageSelect.value = loc.language;
+  if (loc.googleDomain) locGoogleDomainSelect.value = loc.googleDomain;
+  if (loc.searchDepth) rankDepthSelect.value = String(loc.searchDepth);
+  if (loc.deviceType) bulkDeviceSelect.value = loc.deviceType;
+  renderSharedContextSummaries();
+}
+
+function renderClientWorkspace(workspace) {
+  activeClientWorkspace = workspace;
+  const hasClient = Boolean(workspace?.client);
+  clientExportBtn.disabled = !hasClient;
+
+  if (!hasClient) {
+    activeClientPillEl.className = "pill pill-neutral";
+    activeClientPillEl.textContent = "No Active Client";
+    activeClientWorkspaceEl.classList.add("hidden");
+    return;
+  }
+
+  const { client, locations = [], selectedLocation = null, keywords = [], results = [] } = workspace;
+  activeClientPillEl.className = "pill pill-healthy";
+  activeClientPillEl.textContent = `Active: ${client.clientName}`;
+  wsClientHeadingEl.textContent = `${client.clientName} (${client.websiteDomain})`;
+  activeClientWorkspaceEl.classList.remove("hidden");
+
+  rankDomainInput.value = client.websiteDomain || "";
+  if (selectedLocation) {
+    applyLocationRecordToInputs(selectedLocation);
+  } else {
+    renderSharedContextSummaries();
+  }
+
+  cliLocationsListEl.replaceChildren();
+  if (locations.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No client locations saved yet.";
+    cliLocationsListEl.appendChild(empty);
+  } else {
+    for (const loc of locations) {
+      const item = document.createElement("div");
+      item.className = "mini-list-item";
+      const label = document.createElement("span");
+      const activeTag = selectedLocation?.locationId === loc.locationId ? " [Active]" : "";
+      const sheetInfo = loc.worksheetName || loc.reportingRange
+        ? ` · Sheet ${loc.worksheetName || "-"}${loc.reportingRange ? ` (${loc.reportingRange})` : ""}`
+        : "";
+      label.textContent = `${loc.locationName}${loc.stateRegion ? ` (${loc.stateRegion})` : ""} · ${loc.latitude}, ${loc.longitude}${sheetInfo}${activeTag}`;
+
+      const btns = document.createElement("div");
+      btns.className = "actions";
+      const useBtn = document.createElement("button");
+      useBtn.type = "button";
+      useBtn.className = "btn-outline btn-compact";
+      useBtn.textContent = "Use";
+      useBtn.addEventListener("click", () => handleSelectClient(client.clientId, loc.locationId));
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn-outline btn-compact";
+      delBtn.textContent = "Remove";
+      delBtn.addEventListener("click", async () => {
+        const res = await chrome.runtime.sendMessage({
+          type: MESSAGE_TYPES.CLIENT_DELETE_LOCATION,
+          payload: { locationId: loc.locationId },
+        });
+        if (res?.ok) {
+          await refreshClientWorkspace(client.clientId);
+          await refreshClientsOverview();
+        }
+      });
+
+      btns.append(useBtn, delBtn);
+      item.append(label, btns);
+      cliLocationsListEl.appendChild(item);
+    }
+  }
+
+  cliKwCountEl.textContent = String(keywords.length);
+  cliKeywordsListEl.replaceChildren();
+  if (keywords.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No keywords saved for this client yet.";
+    cliKeywordsListEl.appendChild(empty);
+  } else {
+    for (const kw of keywords) {
+      const item = document.createElement("div");
+      item.className = "mini-list-item";
+      const label = document.createElement("span");
+      label.textContent = `${kw.keyword} [${kw.keywordGroup || "Default"} · Row ${kw.rowPosition || "-"}]${kw.active === false ? " (Inactive)" : ""}`;
+
+      const btns = document.createElement("div");
+      btns.className = "actions";
+      const toggleBtn = document.createElement("button");
+      toggleBtn.type = "button";
+      toggleBtn.className = "btn-outline btn-compact";
+      toggleBtn.textContent = kw.active === false ? "Enable" : "Disable";
+      toggleBtn.addEventListener("click", async () => {
+        await chrome.runtime.sendMessage({
+          type: MESSAGE_TYPES.CLIENT_UPDATE_KEYWORD,
+          payload: {
+            clientId: client.clientId,
+            keywordId: kw.keywordId,
+            updates: { active: kw.active === false },
+          },
+        });
+        await refreshClientWorkspace(client.clientId);
+      });
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn-outline btn-compact";
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", async () => {
+        await chrome.runtime.sendMessage({
+          type: MESSAGE_TYPES.CLIENT_DELETE_KEYWORD,
+          payload: { keywordId: kw.keywordId },
+        });
+        await refreshClientWorkspace(client.clientId);
+        await refreshClientsOverview();
+      });
+
+      btns.append(toggleBtn, delBtn);
+      item.append(label, btns);
+      cliKeywordsListEl.appendChild(item);
+    }
+  }
+
+  cliHistoryTbody.replaceChildren();
+  if (results.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 6;
+    td.className = "muted";
+    td.textContent = "No stored ranking results for this client yet.";
+    tr.appendChild(td);
+    cliHistoryTbody.appendChild(tr);
+  } else {
+    for (const row of results.slice(0, 50)) {
+      const tr = document.createElement("tr");
+      const vals = [
+        row.keyword || "-",
+        typeof row.position === "number" ? String(row.position) : "-",
+        row.status || "-",
+        row.rankingUrl || "-",
+        row.checkedAt ? new Date(row.checkedAt).toLocaleString() : "-",
+        row.googleLocation || "-",
+      ];
+      for (const val of vals) {
+        const td = document.createElement("td");
+        td.textContent = val;
+        tr.appendChild(td);
+      }
+      cliHistoryTbody.appendChild(tr);
+    }
+  }
+}
+
+function renderClientCards(overviews = []) {
+  clientOverviewsCache = overviews;
+  clientCardsGridEl.replaceChildren();
+  const activeId = activeClientWorkspace?.client?.clientId || null;
+
+  if (overviews.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No clients match the filter. Click Add Client to create one.";
+    clientCardsGridEl.appendChild(empty);
+    return;
+  }
+
+  for (const ov of overviews) {
+    const card = document.createElement("div");
+    card.className = `client-overview-card${ov.clientId === activeId ? " active-card" : ""}`;
+
+    const head = document.createElement("div");
+    head.className = "card-header-row";
+    const titleWrap = document.createElement("div");
+    const strong = document.createElement("strong");
+    strong.textContent = ov.clientName;
+    const domainDiv = document.createElement("div");
+    domainDiv.className = "muted";
+    domainDiv.textContent = ov.websiteDomain;
+    titleWrap.append(strong, domainDiv);
+
+    const statusPill = document.createElement("span");
+    statusPill.className = `pill ${
+      ov.status === "active" ? "pill-healthy" : ov.status === "archived" ? "pill-neutral" : "pill-pending"
+    }`;
+    statusPill.textContent = ov.status;
+    head.append(titleWrap, statusPill);
+
+    const meta = document.createElement("div");
+    meta.className = "client-card-meta";
+    const metaPairs = [
+      `Keywords: ${ov.keywordCount}`,
+      `Locations: ${ov.locationCount}`,
+      `Top 3: ${ov.hasRankingData ? ov.top3Count : "No data"}`,
+      `Top 10: ${ov.hasRankingData ? ov.top10Count : "No data"}`,
+      `Top 20: ${ov.hasRankingData ? ov.top20Count : "No data"}`,
+      `Sheet: ${ov.sheetConfigStatus}`,
+      `Last Check: ${formatClientTimestamp(ov.lastRankingCheck)}`,
+      `Last Job: ${ov.lastJobStatus || "No data"}`,
+    ];
+    for (const text of metaPairs) {
+      const span = document.createElement("span");
+      span.textContent = text;
+      meta.appendChild(span);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    const selectBtn = document.createElement("button");
+    selectBtn.type = "button";
+    selectBtn.className = "btn-navy btn-compact";
+    selectBtn.textContent = ov.clientId === activeId ? "Selected" : "Select";
+    selectBtn.addEventListener("click", () => handleSelectClient(ov.clientId));
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "btn-outline btn-compact";
+    editBtn.textContent = "Edit";
+    editBtn.addEventListener("click", async () => {
+      const ws = await chrome.runtime.sendMessage({
+        type: MESSAGE_TYPES.CLIENT_GET_WORKSPACE,
+        payload: { clientId: ov.clientId },
+      });
+      if (ws?.ok) {
+        populateClientEditorForm(ws.client);
+        clientEditorPanel.classList.remove("hidden");
+      }
+    });
+
+    const dupBtn = document.createElement("button");
+    dupBtn.type = "button";
+    dupBtn.className = "btn-outline btn-compact";
+    dupBtn.textContent = "Duplicate";
+    dupBtn.addEventListener("click", async () => {
+      const res = await chrome.runtime.sendMessage({
+        type: MESSAGE_TYPES.CLIENT_DUPLICATE,
+        payload: { clientId: ov.clientId },
+      });
+      if (res?.ok) {
+        showBanner(clientFeedbackEl, "success", `Duplicated '${ov.clientName}'.`);
+        await refreshClientsOverview();
+      } else {
+        showBanner(clientFeedbackEl, "error", res?.error || "Duplicate failed.");
+      }
+    });
+
+    const archBtn = document.createElement("button");
+    archBtn.type = "button";
+    archBtn.className = "btn-outline btn-compact";
+    archBtn.textContent = ov.status === "archived" ? "Archived" : "Archive";
+    archBtn.disabled = ov.status === "archived";
+    archBtn.addEventListener("click", async () => {
+      const res = await chrome.runtime.sendMessage({
+        type: MESSAGE_TYPES.CLIENT_ARCHIVE,
+        payload: { clientId: ov.clientId },
+      });
+      if (res?.ok) {
+        await refreshClientsOverview({ preserveWorkspace: true });
+      }
+    });
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "btn-outline btn-compact";
+    delBtn.textContent = "Delete";
+    delBtn.addEventListener("click", async () => {
+      const confirmed = window.confirm(
+        `Permanently delete '${ov.clientName}' and all isolated locations, keywords, and ranking history?`
+      );
+      if (!confirmed) return;
+      const res = await chrome.runtime.sendMessage({
+        type: MESSAGE_TYPES.CLIENT_DELETE,
+        payload: { clientId: ov.clientId, confirmed: true },
+      });
+      if (res?.ok) {
+        if (activeClientWorkspace?.client?.clientId === ov.clientId) {
+          renderClientWorkspace(null);
+        }
+        showBanner(clientFeedbackEl, "success", `Deleted '${ov.clientName}'.`);
+        await refreshClientsOverview();
+      } else {
+        showBanner(clientFeedbackEl, "error", res?.error || "Delete failed.");
+      }
+    });
+
+    actions.append(selectBtn, editBtn, dupBtn, archBtn, delBtn);
+    card.append(head, meta, actions);
+    clientCardsGridEl.appendChild(card);
+  }
+}
+
+async function refreshClientWorkspace(clientId, locationId = null) {
+  if (!clientId) {
+    renderClientWorkspace(null);
+    return;
+  }
+  const ws = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.CLIENT_GET_WORKSPACE,
+    payload: { clientId, locationId },
+  });
+  if (ws?.ok) {
+    renderClientWorkspace(ws);
+  }
+}
+
+async function refreshClientsOverview({ preserveWorkspace = false } = {}) {
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: MESSAGE_TYPES.CLIENT_LIST_OVERVIEWS,
+      payload: {
+        query: clientSearchInput.value,
+        includeArchived: Boolean(clientShowArchivedChk.checked),
+      },
+    });
+    if (res?.ok) {
+      if (res.active?.clientId && (!activeClientWorkspace || preserveWorkspace)) {
+        await refreshClientWorkspace(res.active.clientId, res.active.locationId);
+      }
+      renderClientCards(res.overviews || []);
+    }
+  } catch {
+    // Ignore initial load errors.
+  }
+}
+
+async function handleSelectClient(clientId, locationId = null) {
+  showBanner(clientFeedbackEl, null, "");
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.CLIENT_SELECT,
+    payload: { clientId, locationId },
+  });
+  if (!res?.ok) {
+    showBanner(clientFeedbackEl, "error", res?.error || "Unable to select client.");
+    return;
+  }
+  renderClientWorkspace(res);
+  renderClientCards(clientOverviewsCache);
+  await refreshLocationStatus({ populateInputs: false });
+  showBanner(
+    clientFeedbackEl,
+    "warning",
+    `Switched to '${res.client.clientName}'. Previous location verification was reset — verify location before running checks.`
+  );
+}
+
+clientSearchInput.addEventListener("input", () => {
+  refreshClientsOverview();
+});
+
+clientShowArchivedChk.addEventListener("change", () => {
+  refreshClientsOverview();
+});
+
+clientNewBtn.addEventListener("click", () => {
+  populateClientEditorForm(null);
+  clientEditorPanel.classList.remove("hidden");
+});
+
+clientCancelBtn.addEventListener("click", () => {
+  clientEditorPanel.classList.add("hidden");
+});
+
+cliSheetUrlInput.addEventListener("input", () => {
+  const match = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/.exec(cliSheetUrlInput.value.trim());
+  if (match && !cliSheetIdInput.value.trim()) {
+    cliSheetIdInput.value = match[1];
+  }
+});
+
+clientEditorForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  showBanner(clientFeedbackEl, null, "");
+  const clientId = cliIdInput.value.trim();
+  const payloadData = {
+    clientName: cliNameInput.value,
+    websiteDomain: cliDomainInput.value,
+    websiteUrl: cliUrlInput.value,
+    status: cliStatusSelect.value,
+    notes: cliNotesInput.value,
+    sheetConfig: {
+      sheetUrl: cliSheetUrlInput.value,
+      spreadsheetId: cliSheetIdInput.value,
+      worksheetName: cliWsNameInput.value,
+      worksheetId: cliWsIdInput.value,
+      keywordColumn: cliColKwInput.value,
+      searchVolumeColumn: cliColVolInput.value,
+      competitionColumn: cliColCompInput.value,
+      landingPageColumn: cliColLpInput.value,
+      serpColumn: cliColSerpInput.value,
+      latestDateColumn: cliColDateInput.value,
+    },
+  };
+
+  const res = clientId
+    ? await chrome.runtime.sendMessage({
+        type: MESSAGE_TYPES.CLIENT_UPDATE,
+        payload: { clientId, updates: payloadData },
+      })
+    : await chrome.runtime.sendMessage({
+        type: MESSAGE_TYPES.CLIENT_CREATE,
+        payload: payloadData,
+      });
+
+  if (!res?.ok) {
+    showBanner(
+      clientFeedbackEl,
+      "error",
+      res?.errors?.join(" ") || res?.error || "Failed to save client."
+    );
+    return;
+  }
+
+  clientEditorPanel.classList.add("hidden");
+  showBanner(clientFeedbackEl, "success", `Saved client '${res.client.clientName}'.`);
+  await handleSelectClient(res.client.clientId);
+  await refreshClientsOverview({ preserveWorkspace: true });
+});
+
+cliAddLocBtn.addEventListener("click", async () => {
+  if (!activeClientWorkspace?.client) return;
+  showBanner(clientFeedbackEl, null, "");
+  const coordsText = cliLocCoordsInput.value.trim();
+  const parsed = parseCoordinatePair(coordsText);
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.CLIENT_ADD_LOCATION,
+    payload: {
+      clientId: activeClientWorkspace.client.clientId,
+      locationName: cliLocNameInput.value,
+      stateRegion: cliLocStateInput.value,
+      latitude: parsed ? parsed.latitude : "",
+      longitude: parsed ? parsed.longitude : "",
+      accuracy: Number(locAccuracyInput.value) || 20,
+      country: locCountrySelect.value,
+      language: locLanguageSelect.value,
+      googleDomain: locGoogleDomainSelect.value,
+      deviceType: bulkDeviceSelect.value,
+      searchDepth: Number(rankDepthSelect.value) || 50,
+      worksheetName: cliLocWsInput.value,
+      reportingRange: cliLocColInput.value,
+    },
+  });
+  if (!res?.ok) {
+    showBanner(
+      clientFeedbackEl,
+      "error",
+      res?.errors?.join(" ") || res?.error || "Unable to add client location."
+    );
+    return;
+  }
+  cliLocNameInput.value = "";
+  cliLocCoordsInput.value = "";
+  cliLocStateInput.value = "";
+  cliLocWsInput.value = "";
+  cliLocColInput.value = "";
+  await refreshClientWorkspace(activeClientWorkspace.client.clientId, res.location.locationId);
+  await refreshClientsOverview();
+  showBanner(clientFeedbackEl, "success", `Added location '${res.location.locationName}'.`);
+});
+
+cliAddKwsBtn.addEventListener("click", async () => {
+  if (!activeClientWorkspace?.client) return;
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.CLIENT_IMPORT_KEYWORDS_TEXT,
+    payload: {
+      clientId: activeClientWorkspace.client.clientId,
+      rawText: cliKwPasteInput.value,
+      defaultLocationId: activeClientWorkspace.selectedLocation?.locationId || null,
+    },
+  });
+  if (!res?.ok) {
+    showBanner(clientFeedbackEl, "error", res?.error || "Unable to add keywords.");
+    return;
+  }
+  cliKwPasteInput.value = "";
+  await refreshClientWorkspace(activeClientWorkspace.client.clientId);
+  await refreshClientsOverview();
+  showBanner(clientFeedbackEl, "success", `Saved ${res.added.length} keyword(s) to client.`);
+});
+
+cliKwCsvFileInput.addEventListener("change", async () => {
+  const file = cliKwCsvFileInput.files?.[0];
+  if (!file || !activeClientWorkspace?.client) return;
+  const csvText = await file.text();
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.CLIENT_IMPORT_KEYWORDS_CSV,
+    payload: {
+      clientId: activeClientWorkspace.client.clientId,
+      csvText,
+      defaultLocationId: activeClientWorkspace.selectedLocation?.locationId || null,
+    },
+  });
+  cliKwCsvFileInput.value = "";
+  if (!res?.ok) {
+    showBanner(clientFeedbackEl, "error", res?.error || "CSV import failed.");
+    return;
+  }
+  await refreshClientWorkspace(activeClientWorkspace.client.clientId);
+  await refreshClientsOverview();
+  showBanner(clientFeedbackEl, "success", `Imported ${res.added.length} keyword(s) from CSV.`);
+});
+
+clientLoadBulkBtn.addEventListener("click", () => {
+  if (!activeClientWorkspace?.client) return;
+  const activeKeywords = (activeClientWorkspace.keywords || []).filter((k) => k.active !== false);
+  if (activeKeywords.length === 0) {
+    showBanner(clientFeedbackEl, "error", "No active keywords saved for this client.");
+    return;
+  }
+  parsedBulkQueueInput = activeKeywords.map((k) => ({
+    keyword: k.keyword,
+    keywordId: k.keywordId,
+    keywordGroup: k.keywordGroup,
+    rowPosition: k.rowPosition,
+    landingPage: k.landingPage,
+    searchVolume: k.searchVolume,
+    competition: k.competition,
+  }));
+  bulkKeywordsInput.value = parsedBulkQueueInput.map((k) => k.keyword).join("\n");
+  showBanner(
+    clientFeedbackEl,
+    "success",
+    `Loaded ${parsedBulkQueueInput.length} keyword(s) from '${activeClientWorkspace.client.clientName}' into Bulk Keyword Checker.`
+  );
+});
+
+clientExportBtn.addEventListener("click", async () => {
+  if (!activeClientWorkspace?.client) return;
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.CLIENT_EXPORT_CONFIG,
+    payload: { clientId: activeClientWorkspace.client.clientId },
+  });
+  if (!res?.ok) {
+    showBanner(clientFeedbackEl, "error", res?.error || "Export failed.");
+    return;
+  }
+  const safeName = activeClientWorkspace.client.websiteDomain.replace(/[^a-z0-9.-]+/gi, "-");
+  downloadTextFile(`${safeName}-client-config.json`, res.json, "application/json;charset=utf-8");
+});
+
+clientImportFileInput.addEventListener("change", async () => {
+  const file = clientImportFileInput.files?.[0];
+  if (!file) return;
+  const json = await file.text();
+  clientImportFileInput.value = "";
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.CLIENT_IMPORT_CONFIG,
+    payload: { json },
+  });
+  if (!res?.ok) {
+    showBanner(
+      clientFeedbackEl,
+      "error",
+      res?.errors?.join(" ") || res?.error || "Client JSON import failed."
+    );
+    return;
+  }
+  await handleSelectClient(res.client.clientId);
+  await refreshClientsOverview({ preserveWorkspace: true });
+  showBanner(clientFeedbackEl, "success", `Imported client '${res.client.clientName}'.`);
+});
+
+clientBackupBtn.addEventListener("click", async () => {
+  if (!activeClientWorkspace?.client) return;
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.CLIENT_BACKUP_CREATE,
+    payload: { clientId: activeClientWorkspace.client.clientId },
+  });
+  if (!res?.ok) {
+    showBanner(clientFeedbackEl, "error", res?.error || "Backup creation failed.");
+    return;
+  }
+  showBanner(clientFeedbackEl, "success", `Created local backup snapshot (${res.backup.backupId}).`);
+});
+
 runHealthBtn.addEventListener("click", () => {
   runDashboardHealthCheck();
 });
@@ -1323,6 +1994,7 @@ runHealthBtn.addEventListener("click", () => {
 document.addEventListener("DOMContentLoaded", () => {
   versionEl.textContent = chrome.runtime.getManifest().version || "0.1.0";
   runDashboardHealthCheck();
+  refreshClientsOverview({ preserveWorkspace: true });
   refreshLocationStatus({ populateInputs: true });
   refreshRankingState();
   refreshValidationState();

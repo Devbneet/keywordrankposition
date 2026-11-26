@@ -1,3 +1,8 @@
+import { exportClientConfiguration, importClientConfiguration } from "../modules/clients/client-import-export.js";
+import { createClientManager } from "../modules/clients/client-manager.js";
+import { createClientStorage } from "../modules/clients/client-storage.js";
+import { createKeywordManager } from "../modules/clients/keyword-manager.js";
+import { createLocationManager } from "../modules/clients/location-manager.js";
 import { createJobManager } from "../modules/jobs/job-manager.js";
 import { createJobStorage } from "../modules/jobs/job-storage.js";
 import { createGeolocationController } from "../modules/location/geolocation-controller.js";
@@ -6,12 +11,18 @@ import { createStorageClient, STORAGE_KEYS } from "../modules/storage/storage.js
 import { buildHealthReport } from "../utils/health.js";
 import { MESSAGE_TYPES } from "../utils/messages.js";
 
-// Keep per-storage-instance job manager so Pause/Stop reach the active runner.
-const jobManagerCache = new WeakMap();
+// Keep per-storage-instance services & shared search lock so Pause/Stop and lock enforcement work.
+const serviceCache = new WeakMap();
 
 function getOrCreateServices(chromeApi) {
   const storageArea = chromeApi?.storage?.local;
+  const cached = storageArea ? serviceCache.get(storageArea) : null;
+  if (cached) {
+    return cached;
+  }
+
   const storage = createStorageClient(storageArea);
+  const searchLock = { owner: null };
   const locationController = createGeolocationController({
     chromeApi,
     storageClient: storage,
@@ -20,22 +31,45 @@ function getOrCreateServices(chromeApi) {
     chromeApi,
     storageClient: storage,
     locationController,
+    searchLock,
   });
 
-  let jobManager = storageArea ? jobManagerCache.get(storageArea) : null;
-  if (!jobManager) {
-    const jobStorage = createJobStorage({ storageClient: storage });
-    jobManager = createJobManager({
-      jobStorage,
-      locationController,
-      singleKeywordChecker: rankingChecker,
-    });
-    if (storageArea) {
-      jobManagerCache.set(storageArea, jobManager);
-    }
-  }
+  const jobStorage = createJobStorage({ storageClient: storage });
+  const jobManager = createJobManager({
+    jobStorage,
+    locationController,
+    singleKeywordChecker: rankingChecker,
+    searchLock,
+  });
 
-  return { storage, locationController, rankingChecker, jobManager };
+  const clientStorage = createClientStorage({ storageClient: storage });
+  const locationManager = createLocationManager({ clientStorage });
+  const keywordManager = createKeywordManager({ clientStorage });
+  const clientManager = createClientManager({
+    clientStorage,
+    locationManager,
+    keywordManager,
+    locationController,
+    jobManager,
+  });
+
+  const bundle = {
+    storage,
+    searchLock,
+    locationController,
+    rankingChecker,
+    jobStorage,
+    jobManager,
+    clientStorage,
+    locationManager,
+    keywordManager,
+    clientManager,
+  };
+
+  if (storageArea) {
+    serviceCache.set(storageArea, bundle);
+  }
+  return bundle;
 }
 
 /**
@@ -48,8 +82,16 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
   }
 
   const version = chromeApi?.runtime?.getManifest?.().version || "0.1.0";
-  const { storage, locationController, rankingChecker, jobManager } =
-    getOrCreateServices(chromeApi);
+  const {
+    storage,
+    locationController,
+    rankingChecker,
+    jobManager,
+    clientStorage,
+    locationManager,
+    keywordManager,
+    clientManager,
+  } = getOrCreateServices(chromeApi);
 
   switch (message.type) {
     case MESSAGE_TYPES.HEALTH_CHECK: {
@@ -58,16 +100,13 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
         version,
         storageOk: ping.ok,
         checkedAt: ping.checkedAt,
-        notes: ["Phase 6 core ready (location, single ranking, accuracy lab, and bulk job queue)."],
+        notes: ["Phase 7 core ready (multi-client management, location, ranking, and bulk queue)."],
       });
     }
 
     case MESSAGE_TYPES.STORAGE_SELF_TEST: {
       const ping = await storage.pingStorage();
-      return {
-        ok: ping.ok,
-        checkedAt: ping.checkedAt,
-      };
+      return { ok: ping.ok, checkedAt: ping.checkedAt };
     }
 
     case MESSAGE_TYPES.OPEN_DASHBOARD: {
@@ -88,80 +127,174 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
       return { ok: true, state };
     }
 
-    case MESSAGE_TYPES.LOCATION_OPEN_TEST_TAB: {
-      return locationController.openTestTab({
-        testPageUrl: message.payload?.testPageUrl,
-      });
-    }
+    case MESSAGE_TYPES.LOCATION_OPEN_TEST_TAB:
+      return locationController.openTestTab({ testPageUrl: message.payload?.testPageUrl });
 
-    case MESSAGE_TYPES.LOCATION_APPLY: {
+    case MESSAGE_TYPES.LOCATION_APPLY:
       return locationController.applyLocation(message.payload || {});
-    }
 
-    case MESSAGE_TYPES.LOCATION_TEST: {
+    case MESSAGE_TYPES.LOCATION_TEST:
       return locationController.testLocation();
-    }
 
-    case MESSAGE_TYPES.LOCATION_RESET: {
+    case MESSAGE_TYPES.LOCATION_RESET:
       return locationController.resetLocation();
-    }
 
-    case MESSAGE_TYPES.GOOGLE_LOCATION_APPLY: {
+    case MESSAGE_TYPES.GOOGLE_LOCATION_APPLY:
       return locationController.applyGoogleLocation(message.payload || {});
-    }
 
-    case MESSAGE_TYPES.GOOGLE_LOCATION_VERIFY: {
+    case MESSAGE_TYPES.GOOGLE_LOCATION_VERIFY:
       return locationController.verifyGoogleLocation(message.payload || {});
-    }
 
-    case MESSAGE_TYPES.GOOGLE_LOCATION_OPEN_SEARCH: {
+    case MESSAGE_TYPES.GOOGLE_LOCATION_OPEN_SEARCH:
       return locationController.openGoogleSearch(message.payload || {});
-    }
 
-    case MESSAGE_TYPES.RANKING_CHECK: {
+    case MESSAGE_TYPES.RANKING_CHECK:
       return rankingChecker.checkRanking(message.payload || {});
-    }
 
-    case MESSAGE_TYPES.RANKING_STOP: {
+    case MESSAGE_TYPES.RANKING_STOP:
       return rankingChecker.stopCheck();
-    }
 
-    case MESSAGE_TYPES.RANKING_CLEAR: {
+    case MESSAGE_TYPES.RANKING_CLEAR:
       return rankingChecker.clearResults();
-    }
 
     case MESSAGE_TYPES.RANKING_GET_STATE: {
       const state = await rankingChecker.getState();
       return { ok: true, state };
     }
 
-    case MESSAGE_TYPES.BULK_GET_STATUS: {
+    case MESSAGE_TYPES.BULK_GET_STATUS:
       return jobManager.getStatus();
-    }
 
     case MESSAGE_TYPES.BULK_START: {
-      return jobManager.startJob(message.payload || {});
+      const res = await jobManager.startJob(message.payload || {});
+      if (res?.job?.clientId) {
+        await clientManager.recordClientJobOutcome({
+          clientId: res.job.clientId,
+          job: res.job,
+          tasks: res.tasks || [],
+        });
+      }
+      return res;
     }
 
-    case MESSAGE_TYPES.BULK_PAUSE: {
+    case MESSAGE_TYPES.BULK_PAUSE:
       return jobManager.pauseJob();
-    }
 
     case MESSAGE_TYPES.BULK_RESUME: {
-      return jobManager.resumeJob();
+      const res = await jobManager.resumeJob(message.payload || {});
+      if (res?.job?.clientId) {
+        await clientManager.recordClientJobOutcome({
+          clientId: res.job.clientId,
+          job: res.job,
+          tasks: res.tasks || [],
+        });
+      }
+      return res;
     }
 
-    case MESSAGE_TYPES.BULK_STOP: {
+    case MESSAGE_TYPES.BULK_STOP:
       return jobManager.stopJob();
-    }
 
     case MESSAGE_TYPES.BULK_RETRY_FAILED: {
-      return jobManager.retryFailedKeywords();
+      const res = await jobManager.retryFailedKeywords(message.payload || {});
+      if (res?.job?.clientId) {
+        await clientManager.recordClientJobOutcome({
+          clientId: res.job.clientId,
+          job: res.job,
+          tasks: res.tasks || [],
+        });
+      }
+      return res;
     }
 
-    case MESSAGE_TYPES.BULK_CLEAR: {
-      return jobManager.clearResults();
+    case MESSAGE_TYPES.BULK_CLEAR:
+      return jobManager.clearResults(message.payload || {});
+
+    // Phase 7 Client Management routes
+    case MESSAGE_TYPES.CLIENT_LIST_OVERVIEWS: {
+      const overviews = await clientManager.listClientOverviews(message.payload || {});
+      const active = await clientStorage.getActiveSelection();
+      return { ok: true, overviews, active };
     }
+
+    case MESSAGE_TYPES.CLIENT_GET_WORKSPACE:
+      return clientManager.getClientWorkspace(message.payload?.clientId, {
+        locationId: message.payload?.locationId,
+      });
+
+    case MESSAGE_TYPES.CLIENT_CREATE:
+      return clientManager.createClient(message.payload || {});
+
+    case MESSAGE_TYPES.CLIENT_UPDATE:
+      return clientManager.updateClient(message.payload?.clientId, message.payload?.updates || {});
+
+    case MESSAGE_TYPES.CLIENT_ARCHIVE:
+      return clientManager.archiveClient(message.payload?.clientId);
+
+    case MESSAGE_TYPES.CLIENT_DUPLICATE:
+      return clientManager.duplicateClient(message.payload?.clientId);
+
+    case MESSAGE_TYPES.CLIENT_DELETE:
+      return clientManager.deleteClient(message.payload?.clientId, {
+        confirmed: Boolean(message.payload?.confirmed),
+      });
+
+    case MESSAGE_TYPES.CLIENT_SELECT:
+      return clientManager.selectClient(message.payload || {});
+
+    case MESSAGE_TYPES.CLIENT_ADD_LOCATION:
+      return locationManager.addLocation(message.payload || {});
+
+    case MESSAGE_TYPES.CLIENT_UPDATE_LOCATION:
+      return locationManager.updateLocation(message.payload?.locationId, message.payload || {});
+
+    case MESSAGE_TYPES.CLIENT_DELETE_LOCATION:
+      return locationManager.deleteLocation(message.payload?.locationId);
+
+    case MESSAGE_TYPES.CLIENT_ADD_KEYWORDS:
+      return keywordManager.addKeywords(message.payload || {});
+
+    case MESSAGE_TYPES.CLIENT_IMPORT_KEYWORDS_TEXT:
+      return keywordManager.importFromText(message.payload || {});
+
+    case MESSAGE_TYPES.CLIENT_IMPORT_KEYWORDS_CSV:
+      return keywordManager.importFromCsv(message.payload || {});
+
+    case MESSAGE_TYPES.CLIENT_UPDATE_KEYWORD:
+      return keywordManager.updateKeyword(
+        message.payload?.clientId,
+        message.payload?.keywordId,
+        message.payload?.updates || {}
+      );
+
+    case MESSAGE_TYPES.CLIENT_DELETE_KEYWORD:
+      return keywordManager.deleteKeyword(message.payload?.keywordId);
+
+    case MESSAGE_TYPES.CLIENT_EXPORT_CONFIG: {
+      const ws = await clientManager.getClientWorkspace(message.payload?.clientId);
+      if (!ws.ok) return ws;
+      return {
+        ok: true,
+        json: exportClientConfiguration({
+          client: ws.client,
+          locations: ws.locations,
+          keywords: ws.keywords,
+        }),
+      };
+    }
+
+    case MESSAGE_TYPES.CLIENT_IMPORT_CONFIG:
+      return importClientConfiguration(message.payload?.json, {
+        clientManager,
+        locationManager,
+        keywordManager,
+      });
+
+    case MESSAGE_TYPES.CLIENT_BACKUP_CREATE:
+      return clientStorage.createClientBackup(message.payload?.clientId);
+
+    case MESSAGE_TYPES.CLIENT_BACKUP_RESTORE:
+      return clientStorage.restoreClientBackup(message.payload?.backup);
 
     default:
       return { ok: false, error: `Unknown message type: ${message.type}` };

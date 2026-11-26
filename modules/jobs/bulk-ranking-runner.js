@@ -222,6 +222,7 @@ export function createBulkRankingRunner({
           keyword: task.keyword,
           searchDepth: task.requestedDepth,
           deviceType: currentJob.deviceType || "Desktop",
+          _caller: "bulk",
         });
 
         const r = checkRes?.result;

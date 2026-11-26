@@ -29,7 +29,10 @@ export async function recoverInterruptedJob({ jobStorage }) {
         status: TASK_STATUSES.PENDING,
         errorDetails: "Previous session ended before this keyword completed.",
       };
-      await jobStorage.saveTaskResult(resetTask);
+      const saveTaskRes = await jobStorage.saveTaskResult(resetTask);
+      if (!saveTaskRes.ok) {
+        return { recovered: false, error: saveTaskRes.error, job, tasks };
+      }
       updatedTasks.push(resetTask);
       resetMidFlight = true;
     } else {
@@ -47,7 +50,10 @@ export async function recoverInterruptedJob({ jobStorage }) {
       : "Session interrupted before job completion. Re-verify location and click Resume.",
   };
 
-  await jobStorage.saveJobMetadata(recoveredJob);
+  const saveJobRes = await jobStorage.saveJobMetadata(recoveredJob);
+  if (!saveJobRes.ok) {
+    return { recovered: false, error: saveJobRes.error, job, tasks: updatedTasks };
+  }
   return { recovered: true, job: recoveredJob, tasks: updatedTasks };
 }
 

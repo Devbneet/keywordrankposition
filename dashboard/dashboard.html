@@ -18,12 +18,169 @@
         </div>
           <div class="meta-badges">
           <span class="version-chip">v<span id="dash-version">-</span></span>
-          <span id="dash-phase-chip" class="phase-chip">Phase 6: Bulk Keyword Checker</span>
+          <span id="dash-phase-chip" class="phase-chip">Phase 7: Multi-Client Workspace</span>
         </div>
       </div>
     </header>
 
     <main class="container">
+      <section class="card clients-card">
+        <div class="card-header">
+          <div>
+            <h2>Clients (Phase 7)</h2>
+            <p class="muted">
+              Manage agency client profiles, locations, saved keywords, and Google Sheet mappings. Switching clients resets active location verification safely.
+            </p>
+          </div>
+          <span id="active-client-pill" class="pill pill-neutral">No Active Client</span>
+        </div>
+
+        <div class="filter-bar">
+          <input id="client-search-input" type="text" placeholder="Search clients by name, domain, or ID..." autocomplete="off" />
+          <label class="checkbox-inline">
+            <input id="client-show-archived" type="checkbox" checked />
+            Show archived
+          </label>
+          <button id="btn-client-new" class="btn-navy btn-compact" type="button">Add Client</button>
+          <label class="btn-outline btn-compact file-btn">
+            Import Client JSON
+            <input id="client-import-file" type="file" accept=".json" hidden />
+          </label>
+          <button id="btn-client-export" class="btn-outline btn-compact" type="button" disabled>Export Client</button>
+        </div>
+
+        <div id="client-feedback" class="feedback-banner hidden" role="alert"></div>
+
+        <div id="client-cards-grid" class="client-cards-grid"></div>
+
+        <div id="client-editor-panel" class="status-panel hidden">
+          <h3 id="client-editor-title">Add Client</h3>
+          <form id="client-editor-form" class="location-form" novalidate>
+            <input id="cli-id" type="hidden" />
+            <div class="form-grid-3">
+              <div class="form-row">
+                <label for="cli-name">Client name</label>
+                <input id="cli-name" type="text" placeholder="e.g. Acme Plumbing" />
+              </div>
+              <div class="form-row">
+                <label for="cli-domain">Website domain</label>
+                <input id="cli-domain" type="text" placeholder="e.g. acmeplumbing.com.au" />
+              </div>
+              <div class="form-row">
+                <label for="cli-status">Status</label>
+                <select id="cli-status">
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="archived">Archived</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-grid-2">
+              <div class="form-row">
+                <label for="cli-url">Website URL</label>
+                <input id="cli-url" type="url" placeholder="https://acmeplumbing.com.au/" />
+              </div>
+              <div class="form-row">
+                <label for="cli-notes">Client notes</label>
+                <input id="cli-notes" type="text" placeholder="Optional internal notes" />
+              </div>
+            </div>
+
+            <div class="action-group">
+              <span class="action-group-label">Google Sheet Configuration (Saved Only — No Live Access in Phase 7)</span>
+              <div class="form-grid-4">
+                <div class="form-row">
+                  <label for="cli-sheet-url">Google Sheet URL</label>
+                  <input id="cli-sheet-url" type="url" placeholder="https://docs.google.com/spreadsheets/d/..." />
+                </div>
+                <div class="form-row">
+                  <label for="cli-sheet-id">Spreadsheet ID</label>
+                  <input id="cli-sheet-id" type="text" placeholder="Auto-extracted from URL" />
+                </div>
+                <div class="form-row">
+                  <label for="cli-ws-name">Worksheet name</label>
+                  <input id="cli-ws-name" type="text" value="Keywords" />
+                </div>
+                <div class="form-row">
+                  <label for="cli-ws-id">Worksheet ID</label>
+                  <input id="cli-ws-id" type="text" placeholder="Optional gid" />
+                </div>
+              </div>
+              <div class="form-grid-6">
+                <div class="form-row"><label for="cli-col-kw">Keyword Col</label><input id="cli-col-kw" type="text" value="C" /></div>
+                <div class="form-row"><label for="cli-col-vol">Volume Col</label><input id="cli-col-vol" type="text" value="D" /></div>
+                <div class="form-row"><label for="cli-col-comp">Comp Col</label><input id="cli-col-comp" type="text" value="E" /></div>
+                <div class="form-row"><label for="cli-col-lp">Landing Col</label><input id="cli-col-lp" type="text" value="F" /></div>
+                <div class="form-row"><label for="cli-col-serp">SERP Col</label><input id="cli-col-serp" type="text" value="G" /></div>
+                <div class="form-row"><label for="cli-col-date">Date Col</label><input id="cli-col-date" type="text" value="H" /></div>
+              </div>
+            </div>
+
+            <div class="button-bar">
+              <button class="btn-navy" type="submit">Save Client</button>
+              <button id="btn-client-cancel" class="btn-outline btn-reset" type="button">Cancel</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="active-client-workspace" class="status-panel hidden">
+          <div class="action-group-header">
+            <h3 id="ws-client-heading">Active Client Workspace</h3>
+            <div class="button-bar">
+              <button id="btn-client-backup" class="btn-outline btn-compact" type="button">Create Local Backup</button>
+              <button id="btn-client-load-bulk" class="btn-primary btn-compact" type="button">Load Client Keywords into Bulk Checker</button>
+            </div>
+          </div>
+
+          <div class="grid">
+            <div class="action-group">
+              <span class="action-group-label">Client Locations</span>
+              <div id="cli-locations-list" class="mini-list"></div>
+              <div class="form-grid-2">
+                <input id="cli-loc-name" class="inline-input" type="text" placeholder="Location name (e.g. Sydney)" />
+                <input id="cli-loc-coords" class="inline-input" type="text" placeholder="-33.8688, 151.2093" />
+              </div>
+              <div class="form-grid-3">
+                <input id="cli-loc-state" class="inline-input" type="text" placeholder="State/Region (NSW)" />
+                <input id="cli-loc-ws" class="inline-input" type="text" placeholder="Worksheet (optional)" />
+                <input id="cli-loc-col" class="inline-input" type="text" placeholder="Date col (e.g. H)" />
+              </div>
+              <button id="btn-cli-add-loc" class="btn-outline" type="button">Add Location to Client</button>
+            </div>
+
+            <div class="action-group">
+              <span class="action-group-label">Client Keywords (<span id="cli-kw-count">0</span>)</span>
+              <textarea id="cli-kw-paste" rows="3" placeholder="Paste client keywords (one per line)..."></textarea>
+              <div class="button-bar">
+                <button id="btn-cli-add-kws" class="btn-outline" type="button">Save Keywords to Client</button>
+                <label class="btn-outline btn-compact file-btn">
+                  Import CSV
+                  <input id="cli-kw-csv-file" type="file" accept=".csv" hidden />
+                </label>
+              </div>
+              <div id="cli-keywords-list" class="mini-list"></div>
+            </div>
+          </div>
+
+          <h3 class="subtable-title">Client Ranking History (Isolated)</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Job ID</th>
+                  <th>Date</th>
+                  <th>Location</th>
+                  <th>Total</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="cli-history-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <section class="card location-card">
         <div class="card-header">
           <div>
@@ -785,11 +942,16 @@
               <tr>
                 <td>Phase 6</td>
                 <td>Bulk keyword checking &amp; job management</td>
+                <td><span class="pill pill-healthy">Completed</span></td>
+              </tr>
+              <tr>
+                <td>Phase 7</td>
+                <td>Multiple client configuration &amp; management</td>
                 <td><span class="pill pill-healthy">Current</span></td>
               </tr>
               <tr>
-                <td>Phases 7–12</td>
-                <td>Clients, Google Sheets, scheduling &amp; deployment</td>
+                <td>Phases 8–12</td>
+                <td>Google Sheets, history, scheduling &amp; deployment</td>
                 <td><span class="pill pill-neutral">Pending</span></td>
               </tr>
             </tbody>

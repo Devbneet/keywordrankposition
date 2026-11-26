@@ -141,6 +141,7 @@ export function createSingleKeywordChecker({
   chromeApi = globalThis.chrome,
   storageClient,
   locationController,
+  searchLock = null,
 }) {
   if (!storageClient) {
     throw new Error("storageClient is required for createSingleKeywordChecker.");
@@ -196,6 +197,8 @@ export function createSingleKeywordChecker({
     useManualHtml = false,
     deviceType = "Desktop",
     maxLocationAgeMs = DEFAULT_MAX_LOCATION_AGE_MS,
+    isAuthorized = true,
+    _caller = "single",
   } = {}) {
     const startedAtMs = Date.now();
     const depth = Number(searchDepth) || 50;
@@ -308,7 +311,27 @@ export function createSingleKeywordChecker({
         return { ok: result.status === RANKING_STATUSES.RANKED, result, state: saved };
       }
 
-      // Mode 2: Live authorized Google Search tab — enforce fresh location verification gate!
+      // Mode 2: Live authorized Google Search tab — enforce lock + fresh location verification gate!
+      if (!isAuthorized) {
+        return {
+          ok: false,
+          error: "Authorized search access is required before running a live ranking check.",
+        };
+      }
+      let acquiredSingleLock = false;
+      if (searchLock) {
+        if (_caller !== "bulk" && searchLock.owner) {
+          return {
+            ok: false,
+            error: `Cannot start single check while '${searchLock.owner}' ranking check is running on the search tab.`,
+          };
+        }
+        if (_caller !== "bulk") {
+          searchLock.owner = "single";
+          acquiredSingleLock = true;
+        }
+      }
+      try {
       let liveLocation = locationController
         ? await locationController.getStatus({ reverifyGps: true })
         : null;
@@ -650,6 +673,11 @@ export function createSingleKeywordChecker({
 
       const saved = await persistFinalResult(finalResult);
       return { ok: finalResult.status === RANKING_STATUSES.RANKED, result: finalResult, state: saved };
+      } finally {
+        if (acquiredSingleLock && searchLock?.owner === "single") {
+          searchLock.owner = null;
+        }
+      }
     } finally {
       activeJobs.delete(jobId);
     }

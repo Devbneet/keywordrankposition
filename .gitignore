@@ -14,8 +14,12 @@ service_account*.json
 client_secret*.json
 oauth_token*.json
 
-# Local client exports & temporary files
+# Local client exports, backups & private configs
 exports/
+client-backups/
+*-client-export*.json
+*-backup*.json
+clients.local.json
 tmp/
 *.log
 

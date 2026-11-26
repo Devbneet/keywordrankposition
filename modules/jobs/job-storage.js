@@ -182,29 +182,37 @@ export function createJobStorage({
     return items.sort((a, b) => (a.sequenceIndex ?? 0) - (b.sequenceIndex ?? 0));
   }
 
-  async function clearActiveJob() {
-    const active = await loadActiveJob();
-    await storageClient.remove(JOB_METADATA_KEYS.ACTIVE_JOB);
-    if (active?.jobId) {
-      const fallbackKey = `${JOB_METADATA_KEYS.TASK_FALLBACK_PREFIX}${active.jobId}`;
-      await storageClient.remove(fallbackKey);
-      if (idbFactory) {
-        const db = await openTasksDb(idbFactory);
-        try {
-          const existing = await loadTasksForJob(active.jobId);
-          await runIdbTransaction(db, [TASKS_STORE, JOBS_STORE], "readwrite", (tx) => {
-            const tStore = tx.objectStore(TASKS_STORE);
-            for (const item of existing) {
-              tStore.delete(`${active.jobId}::${item.taskId}`);
-            }
-            tx.objectStore(JOBS_STORE).delete(active.jobId);
-          });
-        } finally {
-          db.close();
+  async function clearActiveJob({ preserveHistory = true } = {}) {
+    try {
+      const active = await loadActiveJob();
+      await storageClient.remove(JOB_METADATA_KEYS.ACTIVE_JOB);
+      if (!preserveHistory && active?.jobId) {
+        const fallbackKey = `${JOB_METADATA_KEYS.TASK_FALLBACK_PREFIX}${active.jobId}`;
+        await storageClient.remove(fallbackKey);
+        if (idbFactory) {
+          const db = await openTasksDb(idbFactory);
+          try {
+            const existing = await loadTasksForJob(active.jobId);
+            await runIdbTransaction(db, [TASKS_STORE, JOBS_STORE], "readwrite", (tx) => {
+              const tStore = tx.objectStore(TASKS_STORE);
+              for (const item of existing) {
+                tStore.delete(`${active.jobId}::${item.taskId}`);
+              }
+              tx.objectStore(JOBS_STORE).delete(active.jobId);
+            });
+          } finally {
+            db.close();
+          }
         }
       }
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        quotaExceeded: isQuotaError(error),
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
-    return { ok: true };
   }
 
   return {
