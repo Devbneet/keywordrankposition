@@ -61,24 +61,35 @@ export function createScheduledJobRunner({
       };
     }
 
+    if (schedule.isAuthorized !== true) {
+      return {
+        ok: false,
+        clientId: entryConfig.clientId,
+        failureCode: SCHEDULE_FAILURE_CODES.AUTH_EXPIRED,
+        error: "Explicit authorized search access (isAuthorized: true) is required before scheduled searches.",
+      };
+    }
+
     const clientLocs = await locationManager.listLocations(client.clientId);
-    const location =
-      (entryConfig.locationId && clientLocs.find((l) => l.locationId === entryConfig.locationId)) ||
-      clientLocs[0] ||
-      null;
+    const location = entryConfig.locationId
+      ? clientLocs.find((l) => l.locationId === entryConfig.locationId) || null
+      : clientLocs[0] || null;
     if (!location) {
       return {
         ok: false,
         clientId: client.clientId,
         clientName: client.clientName,
         failureCode: SCHEDULE_FAILURE_CODES.MISSING_LOCATION,
-        error: `No target location configured for '${client.clientName}'.`,
+        error: entryConfig.locationId
+          ? `Configured location '${entryConfig.locationId}' no longer exists for '${client.clientName}'.`
+          : `No target location configured for '${client.clientName}'.`,
       };
     }
 
-    // Optional Google Sheet auth check & keyword sync
+    // Optional Google Sheet auth check & keyword sync (preserving location-specific sheet mappings)
+    const targetSheetConfig = location.sheetConfig || client.sheetConfig || {};
     const sheetUrlOrId =
-      entryConfig.sheetUrlOrId || client.sheetConfig?.sheetUrl || client.sheetConfig?.spreadsheetId || null;
+      entryConfig.sheetUrlOrId || targetSheetConfig.sheetUrl || targetSheetConfig.spreadsheetId || null;
     let importedFromSheet = false;
     let sheetSyncWarning = null;
 
@@ -100,9 +111,9 @@ export function createScheduledJobRunner({
         clientId: client.clientId,
         locationId: location.locationId,
         sheetUrlOrId,
-        worksheetId: client.sheetConfig?.worksheetId ?? "",
-        worksheetName: client.sheetConfig?.worksheetName ?? "",
-        columnConfig: client.sheetConfig || {},
+        worksheetId: targetSheetConfig.worksheetId ?? "",
+        worksheetName: targetSheetConfig.worksheetName ?? "",
+        columnConfig: targetSheetConfig,
       });
 
       if (!readRes.ok) {
@@ -116,14 +127,18 @@ export function createScheduledJobRunner({
           };
         }
         sheetSyncWarning = `Google Sheet read failed (${readRes.error}); falling back to saved keywords if available.`;
-      } else if (readRes.syncDiff?.hasBreakingDrift) {
+      } else if (
+        readRes.syncDiff?.hasBreakingDrift ||
+        ((readRes.syncDiff?.addedCount > 0 || readRes.syncDiff?.removedCount > 0) &&
+          !schedule.autoApproveSheetKeywordChanges)
+      ) {
         return {
           ok: false,
           clientId: client.clientId,
           clientName: client.clientName,
           failureCode: SCHEDULE_FAILURE_CODES.SHEET_STRUCTURE_DRIFT,
-          error: `Spreadsheet structure changed unexpectedly for '${client.clientName}': ${
-            readRes.syncDiff.driftReasons?.join("; ") || "Manual review required"
+          error: `Spreadsheet structure or keyword list changed unexpectedly for '${client.clientName}': ${
+            readRes.syncDiff.driftReasons?.join("; ") || "Manual approval required before syncing changes"
           }`,
         };
       } else if (Array.isArray(readRes.importedKeywords) && readRes.importedKeywords.length > 0) {
@@ -223,6 +238,9 @@ export function createScheduledJobRunner({
 
     for (let i = 0; i < jobRecord.tasks.length; i += 1) {
       const task = jobRecord.tasks[i];
+      if (task.status === TASK_STATUSES.RANKED || task.status === TASK_STATUSES.NOT_FOUND) {
+        continue; // Recover interrupted scheduled jobs without repeating completed keywords
+      }
       if (i > 0) {
         await delayMs(schedule.testFastDelayMs ?? delayBetweenKeywords);
       }
@@ -249,9 +267,15 @@ export function createScheduledJobRunner({
           haltError = outcome?.errorDetails || outcome?.error || "CAPTCHA / unusual traffic detected.";
           break;
         }
-        if (st === TASK_STATUSES.LOCATION_MISMATCH || outcome?.locationMismatch) {
+        if (
+          st === TASK_STATUSES.LOCATION_MISMATCH ||
+          st === TASK_STATUSES.LOCATION_UNVERIFIED ||
+          outcome?.locationMismatch ||
+          outcome?.permissionDenied ||
+          outcome?.debuggerDisconnected
+        ) {
           haltedByLocation = true;
-          haltError = outcome?.errorDetails || outcome?.error || "Google Search location mismatch during scheduled check.";
+          haltError = outcome?.errorDetails || outcome?.error || "Location/debugger verification failed during scheduled check.";
           break;
         }
         if (attempt <= maxRetries && outcome?.transient !== false) {
@@ -268,9 +292,30 @@ export function createScheduledJobRunner({
       task.isLiveVerified = Boolean(outcome?.isLiveVerified);
       task.requestedDepth = jobRecord.searchDepth;
       task.actualResultsChecked = Number(outcome?.actualResultsChecked ?? 0);
-      task.browserGpsVerification = outcome?.browserGpsVerification || "Verified";
-      task.googleLocationVerification = outcome?.googleLocationVerification || "Verified";
+      task.browserGpsVerification = outcome?.browserGpsVerification || null;
+      task.googleLocationVerification = outcome?.googleLocationVerification || null;
       task.errorDetails = outcome?.errorDetails || outcome?.error || null;
+
+      // Persist each ranking result immediately after every completed keyword
+      const singleResultRecord = {
+        ...task,
+        recordKey: `${jobRecord.jobId}::${task.taskId}`,
+        timestamp: task.checkedAt,
+        sourceMode: "live_bulk",
+      };
+      const saveSingleRes = await clientStorage.saveResultsBatch([singleResultRecord]);
+      if (!saveSingleRes?.ok) {
+        haltError = saveSingleRes?.error || "Storage write failed while persisting keyword result.";
+        break;
+      }
+      if (historyStorage) {
+        const histRes = await historyStorage.saveRankingHistoryBatch([singleResultRecord]);
+        if (!histRes?.ok) {
+          haltError = histRes?.error || "History storage write failed.";
+          break;
+        }
+      }
+      await clientStorage.saveJobRecord(jobRecord);
 
       if (haltedByCaptcha || haltedByLocation) {
         await clientStorage.saveJobRecord({ ...jobRecord, state: JOB_STATES.PAUSED });

@@ -111,12 +111,25 @@ export function createExecutionQueue({
     drainingPromise = (async () => {
       const processed = [];
       let deferredCount = 0;
+      const seenIds = new Set();
+      const maxIterations = 50;
 
-      while (true) {
+      for (let iter = 0; iter < maxIterations; iter += 1) {
         const queued = await listQueuedExecutions();
         if (queued.length === 0) break;
 
         const nextExec = queued[0];
+        if (seenIds.has(nextExec.executionId)) {
+          await scheduleStorage.saveExecution({
+            ...nextExec,
+            status: EXECUTION_STATES.FAILED,
+            firstError: "Execution could not progress (loop prevented).",
+            completedAt: new Date().toISOString(),
+          });
+          break;
+        }
+        seenIds.add(nextExec.executionId);
+
         const conflictCheck = await checkConflict(nextExec.executionId);
         if (conflictCheck.conflict) {
           deferredCount += 1;
@@ -135,8 +148,22 @@ export function createExecutionQueue({
           return { ok: false, error: "jobRunner.runExecution is required to drain queue." };
         }
 
-        const result = await jobRunner.runExecution(nextExec);
+        const claimRes = await scheduleStorage.claimExecution(nextExec.executionId, nextExec.executionId);
+        if (!claimRes.ok) {
+          if (claimRes.alreadyClaimed) continue;
+          break;
+        }
+
+        const result = await jobRunner.runExecution(claimRes.execution);
         processed.push(result);
+        if (!result?.ok && !result?.deferred && claimRes.execution.status === EXECUTION_STATES.RUNNING) {
+          await scheduleStorage.saveExecution({
+            ...claimRes.execution,
+            status: EXECUTION_STATES.FAILED,
+            firstError: result?.error || "Execution failed.",
+            completedAt: new Date().toISOString(),
+          });
+        }
       }
 
       return {

@@ -62,6 +62,28 @@ export function createScheduleStorage({
     return { ok: true, execution };
   }
 
+  async function claimExecution(executionId, ownerId) {
+    if (!executionId) return { ok: false, error: "executionId is required." };
+    const exec = await getExecution(executionId);
+    if (!exec) return { ok: false, error: `Execution '${executionId}' not found.` };
+    if (exec.status !== EXECUTION_STATES.QUEUED) {
+      return {
+        ok: false,
+        alreadyClaimed: true,
+        error: `Execution '${executionId}' is in state '${exec.status}', not Queued.`,
+      };
+    }
+    const claimed = {
+      ...exec,
+      status: EXECUTION_STATES.RUNNING,
+      claimedBy: ownerId || executionId,
+      claimedAt: new Date().toISOString(),
+    };
+    const saveRes = await saveExecution(claimed);
+    if (!saveRes.ok) return saveRes;
+    return { ok: true, execution: claimed };
+  }
+
   async function getExecution(executionId) {
     return db.getByKey(STORES.SCHEDULE_EXECUTIONS, executionId);
   }
@@ -182,6 +204,7 @@ export function createScheduleStorage({
     listSchedules,
     deleteSchedule,
     saveExecution,
+    claimExecution,
     getExecution,
     getExecutionByKey,
     listExecutions,

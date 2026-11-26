@@ -199,8 +199,8 @@ function getOrCreateServices(chromeApi) {
           position: typeof r.position === "number" ? r.position : null,
           rankingUrl: r.rankingUrl || null,
           actualResultsChecked: Number(r.checkedResultsCount ?? r.actualResultsChecked ?? 0),
-          browserGpsVerification: r.browserGpsStatus || "Verified",
-          googleLocationVerification: r.googleLocationStatus || "Verified",
+          browserGpsVerification: r.browserGpsStatus || null,
+          googleLocationVerification: r.googleLocationStatus || null,
           isLiveVerified:
             (mappedStatus === TASK_STATUSES.RANKED || mappedStatus === TASK_STATUSES.NOT_FOUND) &&
             r.isLiveVerified !== false,

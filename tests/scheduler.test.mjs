@@ -262,6 +262,8 @@ test("scheduledJobRunner runs multi-client sequential checks, retries transient 
     timeOfDay: "09:00",
     timezone: "Australia/Sydney",
     automationMode: AUTOMATION_MODES.MODE_A_REVIEW,
+    isAuthorized: true,
+    autoApproveSheetKeywordChanges: true,
     testFastDelayMs: 1,
   });
   assert.equal(batchRes.ok, true);
@@ -361,6 +363,7 @@ test("scheduledJobRunner stops immediately on CAPTCHA or OAuth expiration and pr
     timeOfDay: "09:00",
     timezone: "Australia/Sydney",
     syncSheetBeforeRun: false,
+    isAuthorized: true,
     testFastDelayMs: 1,
   });
 

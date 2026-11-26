@@ -84,6 +84,7 @@ test("executionQueue deduplicates duplicate alarm triggers and defers safely whe
     timeOfDay: "09:00",
     timezone: "UTC",
     syncSheetBeforeRun: false,
+    isAuthorized: true,
     testFastDelayMs: 1,
   });
 
