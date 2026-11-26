@@ -1,4 +1,5 @@
 import { createGeolocationController } from "../modules/location/geolocation-controller.js";
+import { createSingleKeywordChecker } from "../modules/ranking/single-keyword-checker.js";
 import { createStorageClient, STORAGE_KEYS } from "../modules/storage/storage.js";
 import { buildHealthReport } from "../utils/health.js";
 import { MESSAGE_TYPES } from "../utils/messages.js";
@@ -18,6 +19,11 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
     chromeApi,
     storageClient: storage,
   });
+  const rankingChecker = createSingleKeywordChecker({
+    chromeApi,
+    storageClient: storage,
+    locationController,
+  });
 
   switch (message.type) {
     case MESSAGE_TYPES.HEALTH_CHECK: {
@@ -26,7 +32,7 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
         version,
         storageOk: ping.ok,
         checkedAt: ping.checkedAt,
-        notes: ["Phase 3 core ready (background worker, storage, GPS & Google location verification)."],
+        notes: ["Phase 4 core ready (location verification + single keyword organic ranking)."],
       });
     }
 
@@ -84,6 +90,23 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
 
     case MESSAGE_TYPES.GOOGLE_LOCATION_OPEN_SEARCH: {
       return locationController.openGoogleSearch(message.payload || {});
+    }
+
+    case MESSAGE_TYPES.RANKING_CHECK: {
+      return rankingChecker.checkRanking(message.payload || {});
+    }
+
+    case MESSAGE_TYPES.RANKING_STOP: {
+      return rankingChecker.stopCheck();
+    }
+
+    case MESSAGE_TYPES.RANKING_CLEAR: {
+      return rankingChecker.clearResults();
+    }
+
+    case MESSAGE_TYPES.RANKING_GET_STATE: {
+      const state = await rankingChecker.getState();
+      return { ok: true, state };
     }
 
     default:

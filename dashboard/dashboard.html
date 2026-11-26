@@ -18,7 +18,7 @@
         </div>
         <div class="meta-badges">
           <span class="version-chip">v<span id="dash-version">-</span></span>
-          <span id="dash-phase-chip" class="phase-chip">Phase 3: Google Location Verification</span>
+          <span id="dash-phase-chip" class="phase-chip">Phase 4: Single Keyword Ranking</span>
         </div>
       </div>
     </header>
@@ -29,7 +29,7 @@
           <div>
             <h2>Location &amp; Google Search Verification</h2>
             <p class="muted">
-              Shared location settings for Browser GPS (Phase 2) and Google Search Location Verification (Phase 3).
+              Shared location settings for Browser GPS (Phase 2), Google Search Location Verification (Phase 3), and Single Keyword Ranking (Phase 4).
               Paste <code>-33.8688, 151.2093</code> into Latitude to auto-split.
             </p>
           </div>
@@ -199,8 +199,161 @@
             </div>
           </div>
           <p class="limitation-note">
-            Note: Browser GPS verification (<code>navigator.geolocation</code>), country/language presets, and a city-level footer match on Google Search are reported independently. None of them guarantee exact GPS-based ranking accuracy when Google uses IP address or account signals. Verification stops immediately if Google shows a CAPTCHA or access restriction.
+            Note: Browser GPS verification (<code>navigator.geolocation</code>), country/language presets, and a city-level footer match on Google Search are reported independently. None of them guarantee exact GPS-based ranking accuracy when Google uses IP address or account signals.
           </p>
+        </div>
+      </section>
+
+      <section class="card ranking-card">
+        <div class="card-header">
+          <div>
+            <h2>Single Keyword Ranking (Phase 4)</h2>
+            <p class="muted">
+              Check one keyword using the verified Google Search location above, or parse manually supplied SERP HTML.
+            </p>
+          </div>
+          <span id="rank-status-pill" class="pill pill-neutral">Ready</span>
+        </div>
+
+        <div class="context-summary-grid">
+          <div class="summary-chip">
+            <span class="summary-label">Configured Location</span>
+            <span id="rank-ctx-location" class="summary-val">Not configured</span>
+          </div>
+          <div class="summary-chip">
+            <span class="summary-label">Lat / Lng</span>
+            <span id="rank-ctx-coords" class="summary-val">-</span>
+          </div>
+          <div class="summary-chip">
+            <span class="summary-label">Google-Detected Location</span>
+            <span id="rank-ctx-google" class="summary-val">Unverified</span>
+          </div>
+          <div class="summary-chip">
+            <span class="summary-label">Country / Language</span>
+            <span id="rank-ctx-locale" class="summary-val">-</span>
+          </div>
+        </div>
+
+        <form id="ranking-form" class="location-form" novalidate>
+          <div class="form-grid-3">
+            <div class="form-row">
+              <label for="rank-domain">Client website domain</label>
+              <input id="rank-domain" type="text" placeholder="e.g. example.com" autocomplete="off" />
+            </div>
+
+            <div class="form-row">
+              <label for="rank-keyword">Target keyword</label>
+              <input id="rank-keyword" type="text" placeholder="e.g. seo agency sydney" autocomplete="off" />
+            </div>
+
+            <div class="form-row">
+              <label for="rank-depth">Search depth</label>
+              <select id="rank-depth">
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="30">30</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="manual-html-box">
+            <label class="checkbox-inline">
+              <input id="rank-use-manual-html" type="checkbox" />
+              Use Manual SERP HTML testing mode (parse supplied SERP HTML instead of live Google Search)
+            </label>
+            <div id="rank-manual-panel" class="manual-panel hidden">
+              <div class="form-row">
+                <label for="rank-manual-file">Upload SERP HTML file (optional)</label>
+                <input id="rank-manual-file" type="file" accept=".html,.htm" />
+              </div>
+              <div class="form-row">
+                <label for="rank-manual-html">Paste SERP HTML</label>
+                <textarea
+                  id="rank-manual-html"
+                  rows="5"
+                  placeholder="Paste full Google SERP HTML here..."
+                ></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div id="rank-feedback" class="feedback-banner hidden" role="alert"></div>
+
+          <div class="button-bar">
+            <button id="btn-check-ranking" class="btn-navy" type="submit">Check Ranking</button>
+            <button id="btn-stop-ranking" class="btn-outline" type="button" disabled>Stop</button>
+            <button id="btn-clear-ranking" class="btn-outline btn-reset" type="button">Clear Results</button>
+          </div>
+        </form>
+
+        <div id="rank-result-panel" class="status-panel hidden">
+          <h3>Ranking Result Details</h3>
+          <div class="kv-list">
+            <div class="kv-row">
+              <span class="kv-label">Result status</span>
+              <span id="res-status" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Keyword</span>
+              <span id="res-keyword" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Target website</span>
+              <span id="res-website" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Organic ranking position</span>
+              <span id="res-position" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Actual ranking URL</span>
+              <span id="res-url" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Organic results checked / Requested depth</span>
+              <span id="res-depth-count" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Browser GPS status</span>
+              <span id="res-gps-status" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Google location status</span>
+              <span id="res-google-status" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Google location source</span>
+              <span id="res-google-source" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Check date and time</span>
+              <span id="res-checked-at" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Processing duration</span>
+              <span id="res-duration" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Error details</span>
+              <span id="res-error" class="kv-value">None</span>
+            </div>
+          </div>
+
+          <h3 class="subtable-title">Extracted Organic Results</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Position</th>
+                  <th>Page Title</th>
+                  <th>URL</th>
+                </tr>
+              </thead>
+              <tbody id="rank-results-tbody"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -236,14 +389,14 @@
 
         <article class="card">
           <div class="card-header">
-            <h2>Phase 3 Scope &amp; Guardrails</h2>
+            <h2>Phase 4 Scope &amp; Guardrails</h2>
             <span class="pill pill-healthy">Active</span>
           </div>
           <ul class="checklist">
-            <li>Dedicated Google Search tab with explicit debugger isolation.</li>
-            <li>Independent Browser GPS vs. Google footer location verification.</li>
-            <li>Automatic invalidation when coordinates, city, domain, or tab URL changes.</li>
-            <li>Immediate halt on CAPTCHA or access restrictions; no ranking or Sheet edits yet.</li>
+            <li>Excludes sponsored ads, local packs, PAA, AI Overviews, shopping, carousels, and sitelinks.</li>
+            <li>Exact domain &amp; legitimate subdomain matching without partial-name false positives.</li>
+            <li>Stops safely if location is unverified, mismatched, blocked, or interrupted by user.</li>
+            <li>No bulk keyword queues or Google Sheets edits yet.</li>
           </ul>
         </article>
       </section>
@@ -276,12 +429,12 @@
               <tr>
                 <td>Phase 3</td>
                 <td>Google search location verification</td>
-                <td><span class="pill pill-healthy">Current</span></td>
+                <td><span class="pill pill-healthy">Completed</span></td>
               </tr>
               <tr>
                 <td>Phase 4</td>
                 <td>Single keyword organic ranking detection</td>
-                <td><span class="pill pill-neutral">Pending</span></td>
+                <td><span class="pill pill-healthy">Current</span></td>
               </tr>
               <tr>
                 <td>Phases 5–12</td>

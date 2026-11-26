@@ -1,6 +1,11 @@
 /**
- * Content script placeholder (Phase 1).
- * Search result inspection will be introduced in Phases 3-4 only where authorized.
+ * Content-script helpers for capturing the current SERP DOM snapshot safely.
  */
-export const CONTENT_SCRIPT_VERSION = "0.1.0";
+export const CONTENT_SCRIPT_VERSION = "0.2.0";
 
+export function readPageSerpSnapshot(doc = globalThis.document, win = globalThis.window) {
+  return {
+    html: doc?.documentElement ? doc.documentElement.outerHTML : "",
+    pageUrl: win?.location ? win.location.href : "",
+  };
+}

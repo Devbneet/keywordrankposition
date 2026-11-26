@@ -17,6 +17,10 @@ const BLOCK_INDICATORS = [
   "detected unusual traffic",
 ];
 
+function escapeRegExp(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function stripTags(html) {
   return String(html || "")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -89,15 +93,15 @@ function extractFooterLocationAndSource(html) {
     }
   }
 
-  // Check surrounding footer/swml container for source text ("From your device", "From your IP address", etc.)
-  const footerMatch = /<footer[\s\S]*?<\/footer>/i.exec(html) || /<div[^>]*id="footcnt"[\s\S]*?<\/div>/i.exec(html);
+  const footerMatch =
+    /<footer[\s\S]*?<\/footer>/i.exec(html) || /<div[^>]*id="footcnt"[\s\S]*?<\/div>/i.exec(html);
   const contextText = stripTags(footerMatch ? footerMatch[0] : html);
 
   if (!locationText) {
-    // Fallback: look for "Results for <Location> - From your ..." or "<Location> - Based on your IP address"
-    const inlineMatch = /(?:Results for\s+)?([A-Za-z0-9 ,.'-]{2,60})\s*[-–—]\s*(From your device|From your IP address|Based on your IP address|From your internet address|From your places[^<\n]*)/i.exec(
-      contextText
-    );
+    const inlineMatch =
+      /(?:Results for\s+)?([A-Za-z0-9 ,.'-]{2,60})\s*[-–—]\s*(From your device|From your IP address|Based on your IP address|From your internet address|From your places[^<\n]*)/i.exec(
+        contextText
+      );
     if (inlineMatch) {
       locationText = inlineMatch[1].trim();
     }
@@ -107,11 +111,13 @@ function extractFooterLocationAndSource(html) {
     return { detectedLocation: null, locationSource: null, locationSourceType: null };
   }
 
-  // Strip trailing source text if embedded inside the same element (e.g. "Sydney NSW - From your device")
   const combinedText = `${locationText} ${contextText}`;
   const sourceInfo = classifyLocationSource(combinedText);
   const cleanedLocation = locationText
-    .replace(/\s*[-–—]\s*(From your device|From your IP address|Based on your IP address|From your internet address|From your places.*|Update location.*|Use precise location.*)$/i, "")
+    .replace(
+      /\s*[-–—]\s*(From your device|From your IP address|Based on your IP address|From your internet address|From your places.*|Update location.*|Use precise location.*)$/i,
+      ""
+    )
     .trim();
 
   return {
@@ -121,24 +127,54 @@ function extractFooterLocationAndSource(html) {
   };
 }
 
-function locationMatchesTarget({ detectedLocation, targetCity, targetCountry }) {
-  const lowerDetected = String(detectedLocation || "").toLowerCase();
-  const city = String(targetCity || "").trim().toLowerCase();
-  const country = String(targetCountry || "").trim().toLowerCase();
+/**
+ * Match target city against Google's comma-separated location segments without
+ * partial-name false positives (e.g. "York" must not match "New York" or "Yorkshire").
+ */
+function segmentMatchesExactCity(segment, targetCity) {
+  const cleanedSegment = segment.trim().replace(/\s+/g, " ");
+  const cityPattern = new RegExp(`^${escapeRegExp(targetCity)}(?:\\s+[A-Z]{2,3})?$`, "i");
+  if (cityPattern.test(cleanedSegment)) {
+    // Verify trailing suffix, if any, was actually an uppercase region code (e.g. "Sydney NSW")
+    const remainder = cleanedSegment.slice(targetCity.length).trim();
+    return remainder === "" || /^[A-Z]{2,3}$/.test(remainder);
+  }
+  return false;
+}
+
+function segmentMatchesWordBoundary(text, target) {
+  const pattern = new RegExp(`(?:^|[^a-z0-9])${escapeRegExp(target)}(?:$|[^a-z0-9])`, "i");
+  return pattern.test(text);
+}
+
+export function locationMatchesTarget({
+  detectedLocation,
+  targetCity,
+  targetCountry,
+  locationSourceType = "unknown",
+}) {
+  const rawDetected = String(detectedLocation || "").trim();
+  const city = String(targetCity || "").trim();
+  const country = String(targetCountry || "").trim();
+  const segments = rawDetected.split(",").map((s) => s.trim()).filter(Boolean);
 
   if (city) {
-    return {
-      matched: lowerDetected.includes(city),
-      matchedBy: "city",
-    };
+    const cityMatched = segments.some((seg) => segmentMatchesExactCity(seg, city));
+    if (cityMatched) {
+      let matchType = "city_unknown_source";
+      if (locationSourceType === "device") matchType = "device_city";
+      else if (locationSourceType === "ip") matchType = "ip_city";
+      else if (locationSourceType === "places") matchType = "places_city";
+      return { matched: true, matchedBy: "city", matchType };
+    }
+    return { matched: false, matchedBy: "none", matchType: "none" };
   }
-  if (country) {
-    return {
-      matched: lowerDetected.includes(country),
-      matchedBy: "country",
-    };
+
+  if (country && segmentMatchesWordBoundary(rawDetected, country)) {
+    return { matched: true, matchedBy: "country", matchType: "country_only" };
   }
-  return { matched: false, matchedBy: "none" };
+
+  return { matched: false, matchedBy: "none", matchType: "none" };
 }
 
 /**
@@ -160,6 +196,7 @@ export function inspectGoogleSearchHtml({
       locationSource: null,
       locationSourceType: null,
       matchedBy: null,
+      matchType: "none",
       checkedAt,
       pageUrl,
       error: blockReason,
@@ -175,6 +212,7 @@ export function inspectGoogleSearchHtml({
       locationSource: null,
       locationSourceType: null,
       matchedBy: null,
+      matchType: "none",
       checkedAt,
       pageUrl,
       error: null,
@@ -186,13 +224,14 @@ export function inspectGoogleSearchHtml({
     detectedLocation,
     targetCity,
     targetCountry,
+    locationSourceType,
   });
 
   let warning = null;
   if (locationSourceType === "ip") {
     warning = "Google reported location from IP address rather than browser GPS device location.";
-  } else if (comparison.matched && comparison.matchedBy === "country") {
-    warning = "Matched country only (no target city specified). Does not prove city-level accuracy.";
+  } else if (comparison.matchType === "country_only") {
+    warning = "Country-only match (no target city verified). Does not prove city-level or GPS accuracy.";
   } else if (comparison.matched) {
     warning = GOOGLE_LOCATION_LIMITATION_NOTE;
   }
@@ -203,6 +242,7 @@ export function inspectGoogleSearchHtml({
     locationSource,
     locationSourceType,
     matchedBy: comparison.matchedBy,
+    matchType: comparison.matchType,
     checkedAt,
     pageUrl,
     error: comparison.matched
@@ -265,6 +305,7 @@ export async function verifyGoogleSearchLocation({
       locationSource: null,
       locationSourceType: null,
       matchedBy: null,
+      matchType: "none",
       checkedAt,
       pageUrl: null,
       error: msg,
@@ -280,6 +321,7 @@ export async function verifyGoogleSearchLocation({
       locationSource: null,
       locationSourceType: null,
       matchedBy: null,
+      matchType: "none",
       checkedAt,
       pageUrl: null,
       error: "Unable to read Google page content from active tab.",
@@ -299,4 +341,3 @@ export async function verifyGoogleSearchLocation({
     triggeredUpdateControl: Boolean(payload.triggeredUpdateControl),
   };
 }
-
