@@ -6,6 +6,11 @@ import { createLocationManager } from "../modules/clients/location-manager.js";
 import { createJobManager } from "../modules/jobs/job-manager.js";
 import { createJobStorage } from "../modules/jobs/job-storage.js";
 import { createGeolocationController } from "../modules/location/geolocation-controller.js";
+import { createHistoryStorage } from "../modules/history/history-storage.js";
+import { buildCurrentAndPreviousSnapshots, buildKeywordTrendSeries, compareTwoReportingDates } from "../modules/history/ranking-history.js";
+import { computeAgencyOverviewMetrics, computeClientDashboardMetrics } from "../modules/history/ranking-metrics.js";
+import { createActivityLogger, LOG_CATEGORIES } from "../modules/logging/activity-logger.js";
+import { generateAgencyCsvReport } from "../modules/reports/report-generator.js";
 import { createSingleKeywordChecker } from "../modules/ranking/single-keyword-checker.js";
 import { createGoogleAuthClient } from "../modules/sheets/google-auth.js";
 import { createSheetBackupManager } from "../modules/sheets/sheet-backup-manager.js";
@@ -81,6 +86,8 @@ function getOrCreateServices(chromeApi) {
     clientStorage,
     locationManager,
   });
+  const historyStorage = createHistoryStorage({ storageClient: storage });
+  const activityLogger = createActivityLogger({ storageClient: storage });
 
   const bundle = {
     storage,
@@ -100,6 +107,8 @@ function getOrCreateServices(chromeApi) {
     sheetBackupManager,
     updateJournal,
     sheetUpdater,
+    historyStorage,
+    activityLogger,
   };
 
   if (storageArea) {
@@ -128,9 +137,12 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
     keywordManager,
     clientManager,
     googleAuthClient,
+    sheetsWriteClient,
     sheetReader,
     sheetBackupManager,
     sheetUpdater,
+    historyStorage,
+    activityLogger,
   } = getOrCreateServices(chromeApi);
 
   switch (message.type) {
@@ -170,8 +182,17 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
     case MESSAGE_TYPES.LOCATION_OPEN_TEST_TAB:
       return locationController.openTestTab({ testPageUrl: message.payload?.testPageUrl });
 
-    case MESSAGE_TYPES.LOCATION_APPLY:
-      return locationController.applyLocation(message.payload || {});
+    case MESSAGE_TYPES.LOCATION_APPLY: {
+      const res = await locationController.applyLocation(message.payload || {});
+      await activityLogger.logEvent({
+        category: LOG_CATEGORIES.LOCATION_VERIFICATION,
+        level: res.ok ? "info" : "warning",
+        message: res.ok
+          ? `Applied browser GPS location (${message.payload?.locationName || "custom"})`
+          : `Location apply warning: ${res.errors?.join(" ") || res.error || "Mismatch"}`,
+      });
+      return res;
+    }
 
     case MESSAGE_TYPES.LOCATION_TEST:
       return locationController.testLocation();
@@ -182,14 +203,44 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
     case MESSAGE_TYPES.GOOGLE_LOCATION_APPLY:
       return locationController.applyGoogleLocation(message.payload || {});
 
-    case MESSAGE_TYPES.GOOGLE_LOCATION_VERIFY:
-      return locationController.verifyGoogleLocation(message.payload || {});
+    case MESSAGE_TYPES.GOOGLE_LOCATION_VERIFY: {
+      const res = await locationController.verifyGoogleLocation(message.payload || {});
+      await activityLogger.logEvent({
+        category: LOG_CATEGORIES.LOCATION_VERIFICATION,
+        level: res.ok ? "info" : "warning",
+        message: res.ok
+          ? `Google Search location verified (${res.state?.googleDetectedLocation || "matched"})`
+          : `Google Search location check status: ${res.state?.googleLocationStatus || res.error || "unverified"}`,
+      });
+      return res;
+    }
 
     case MESSAGE_TYPES.GOOGLE_LOCATION_OPEN_SEARCH:
       return locationController.openGoogleSearch(message.payload || {});
 
-    case MESSAGE_TYPES.RANKING_CHECK:
-      return rankingChecker.checkRanking(message.payload || {});
+    case MESSAGE_TYPES.RANKING_CHECK: {
+      const res = await rankingChecker.checkRanking(message.payload || {});
+      if (res?.result) {
+        const active = await clientStorage.getActiveSelection();
+        await historyStorage.saveRankingHistoryBatch([
+          {
+            ...res.result,
+            clientId: message.payload?.clientId || active?.clientId || "unassigned",
+            locationId: message.payload?.locationId || active?.locationId || null,
+            sourceMode: res.result.useManualHtml ? "manual_html" : "live_single",
+          },
+        ]);
+        if (String(res.result.status).toLowerCase().includes("captcha") || res.result.status === "Search blocked") {
+          await activityLogger.logEvent({
+            category: LOG_CATEGORIES.CAPTCHA_DETECTED,
+            level: "error",
+            clientId: active?.clientId || null,
+            message: `Search blocked / CAPTCHA during single check for '${res.result.keyword}'.`,
+          });
+        }
+      }
+      return res;
+    }
 
     case MESSAGE_TYPES.RANKING_STOP:
       return rankingChecker.stopCheck();
@@ -214,6 +265,31 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
           tasks: res.tasks || [],
         });
       }
+      if (res?.tasks?.length) {
+        await historyStorage.saveRankingHistoryBatch(
+          res.tasks.map((t) => ({
+            ...t,
+            clientId: res.job?.clientId || "unassigned",
+            locationId: res.job?.locationId || null,
+            locationName: res.job?.locationConfig?.locationName || "",
+            deviceType: res.job?.deviceType || "Desktop",
+            sourceMode: "live_bulk",
+          }))
+        );
+      }
+      if (res?.job) {
+        const hasCaptcha = (res.tasks || []).some((t) => t.status === "Search blocked");
+        await activityLogger.logEvent({
+          category: hasCaptcha
+            ? LOG_CATEGORIES.CAPTCHA_DETECTED
+            : res.job.state === "Completed"
+              ? LOG_CATEGORIES.JOB_COMPLETED
+              : LOG_CATEGORIES.JOB_INTERRUPTED,
+          level: res.ok ? "info" : "warning",
+          clientId: res.job.clientId || null,
+          message: `Bulk job ${res.job.jobId} finished with state '${res.job.state}' (${res.job.totalKeywords} keywords).`,
+        });
+      }
       return res;
     }
 
@@ -229,6 +305,16 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
           tasks: res.tasks || [],
         });
       }
+      if (res?.tasks?.length) {
+        await historyStorage.saveRankingHistoryBatch(
+          res.tasks.map((t) => ({
+            ...t,
+            clientId: res.job?.clientId || "unassigned",
+            locationId: res.job?.locationId || null,
+            sourceMode: "live_bulk",
+          }))
+        );
+      }
       return res;
     }
 
@@ -243,6 +329,16 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
           job: res.job,
           tasks: res.tasks || [],
         });
+      }
+      if (res?.tasks?.length) {
+        await historyStorage.saveRankingHistoryBatch(
+          res.tasks.map((t) => ({
+            ...t,
+            clientId: res.job?.clientId || "unassigned",
+            locationId: res.job?.locationId || null,
+            sourceMode: "live_bulk",
+          }))
+        );
       }
       return res;
     }
@@ -262,11 +358,29 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
         locationId: message.payload?.locationId,
       });
 
-    case MESSAGE_TYPES.CLIENT_CREATE:
-      return clientManager.createClient(message.payload || {});
+    case MESSAGE_TYPES.CLIENT_CREATE: {
+      const res = await clientManager.createClient(message.payload || {});
+      if (res?.ok) {
+        await activityLogger.logEvent({
+          category: LOG_CATEGORIES.CLIENT_CONFIG,
+          clientId: res.client.clientId,
+          message: `Created client '${res.client.clientName}' (${res.client.websiteDomain}).`,
+        });
+      }
+      return res;
+    }
 
-    case MESSAGE_TYPES.CLIENT_UPDATE:
-      return clientManager.updateClient(message.payload?.clientId, message.payload?.updates || {});
+    case MESSAGE_TYPES.CLIENT_UPDATE: {
+      const res = await clientManager.updateClient(message.payload?.clientId, message.payload?.updates || {});
+      if (res?.ok) {
+        await activityLogger.logEvent({
+          category: LOG_CATEGORIES.CLIENT_CONFIG,
+          clientId: res.client.clientId,
+          message: `Updated configuration for client '${res.client.clientName}'.`,
+        });
+      }
+      return res;
+    }
 
     case MESSAGE_TYPES.CLIENT_ARCHIVE:
       return clientManager.archiveClient(message.payload?.clientId);
@@ -448,6 +562,210 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
         ok: true,
         journal: await clientStorage.listUpdateJournalByClient(message.payload?.clientId),
       };
+
+    case MESSAGE_TYPES.SHEETS_BACKUP_RESTORE: {
+      const p = message.payload || {};
+      const bkp = await sheetBackupManager.getBackup(p.backupId);
+      const res = await sheetBackupManager.restoreFromBackup({
+        backupRecord: bkp,
+        writeClient: sheetsWriteClient,
+        mode: p.mode || "dry-run",
+        dryRun: p.dryRun !== false,
+        confirmedByUser: Boolean(p.confirmedByUser),
+      });
+      await activityLogger.logEvent({
+        category: LOG_CATEGORIES.RECOVERY,
+        level: res.ok ? "info" : "error",
+        clientId: bkp?.clientId || null,
+        message: res.ok
+          ? `Backup restore executed (${res.dryRun ? "dry-run" : "live"}) using '${p.backupId}'.`
+          : `Backup restore blocked/failed: ${res.error}`,
+      });
+      return res;
+    }
+
+    // Phase 10 Agency Dashboard, History, Reports, Logs, and Settings routes
+    case MESSAGE_TYPES.DASHBOARD_AGENCY_OVERVIEW: {
+      const clients = await clientStorage.listClients();
+      await historyStorage.migrateLegacyResultsToHistory({ clients, clientStorage });
+      const allLocations = [];
+      const allKeywords = [];
+      const allJobs = [];
+      const allJournal = [];
+      for (const c of clients) {
+        allLocations.push(...(await locationManager.listLocations(c.clientId)));
+        allKeywords.push(...(await keywordManager.listKeywords(c.clientId)));
+        allJobs.push(...(await clientStorage.listJobsByClient(c.clientId)));
+        allJournal.push(...(await clientStorage.listUpdateJournalByClient(c.clientId)));
+      }
+      const historyRecords = await historyStorage.queryRankingHistory({ limit: 5000 });
+      const metrics = computeAgencyOverviewMetrics({
+        clients,
+        locations: allLocations,
+        keywords: allKeywords,
+        historyRecords,
+        jobs: allJobs,
+        journalEntries: allJournal,
+      });
+      return {
+        ok: true,
+        metrics,
+        snapshots: buildCurrentAndPreviousSnapshots(historyRecords),
+      };
+    }
+
+    case MESSAGE_TYPES.CLIENT_DASHBOARD_METRICS: {
+      const cid = message.payload?.clientId;
+      const client = await clientStorage.getClient(cid);
+      if (!client) return { ok: false, error: "Client not found." };
+      await historyStorage.migrateLegacyResultsToHistory({ clients: [client], clientStorage });
+      const locations = await locationManager.listLocations(cid);
+      const keywords = await keywordManager.listKeywords(cid);
+      const jobs = await clientStorage.listJobsByClient(cid);
+      const journalEntries = await clientStorage.listUpdateJournalByClient(cid);
+      const historyRecords = await historyStorage.queryRankingHistory({ clientId: cid, limit: 2000 });
+      const metrics = computeClientDashboardMetrics({
+        client,
+        locations,
+        keywords,
+        historyRecords,
+        jobs,
+        journalEntries,
+      });
+      return { ok: true, metrics };
+    }
+
+    case MESSAGE_TYPES.HISTORY_QUERY: {
+      const p = message.payload || {};
+      const clients = await clientStorage.listClients();
+      await historyStorage.migrateLegacyResultsToHistory({ clients, clientStorage });
+      const records = await historyStorage.queryRankingHistory(p);
+      return {
+        ok: true,
+        records,
+        snapshots: buildCurrentAndPreviousSnapshots(records),
+      };
+    }
+
+    case MESSAGE_TYPES.HISTORY_COMPARE_DATES: {
+      const p = message.payload || {};
+      const records = await historyStorage.queryRankingHistory({
+        clientId: p.clientId || null,
+        locationId: p.locationId || null,
+        limit: 5000,
+      });
+      return {
+        ok: true,
+        comparisons: compareTwoReportingDates({
+          historyRecords: records,
+          dateA: p.dateA,
+          dateB: p.dateB,
+          clientId: p.clientId || null,
+          locationId: p.locationId || null,
+        }),
+      };
+    }
+
+    case MESSAGE_TYPES.HISTORY_TREND: {
+      const p = message.payload || {};
+      const records = await historyStorage.queryRankingHistory({
+        clientId: p.clientId || null,
+        locationId: p.locationId || null,
+        keywordId: p.keywordId || null,
+        limit: 1000,
+      });
+      return {
+        ok: true,
+        series: buildKeywordTrendSeries({
+          historyRecords: records,
+          clientId: p.clientId,
+          locationId: p.locationId || null,
+          keywordId: p.keywordId || null,
+          keywordText: p.keywordText || "",
+        }),
+      };
+    }
+
+    case MESSAGE_TYPES.JOBS_LIST_ALL: {
+      const clients = await clientStorage.listClients();
+      const jobs = [];
+      for (const c of clients) {
+        const cJobs = await clientStorage.listJobsByClient(c.clientId);
+        for (const j of cJobs) {
+          jobs.push({ ...j, clientName: c.clientName });
+        }
+      }
+      jobs.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+      return { ok: true, jobs };
+    }
+
+    case MESSAGE_TYPES.REPORTS_GENERATE: {
+      const p = message.payload || {};
+      const clients = await clientStorage.listClients();
+      await historyStorage.migrateLegacyResultsToHistory({ clients, clientStorage });
+      const locationsByClient = {};
+      const keywordsByClient = {};
+      const allJobs = [];
+      const allJournal = [];
+      for (const c of clients) {
+        locationsByClient[c.clientId] = await locationManager.listLocations(c.clientId);
+        keywordsByClient[c.clientId] = await keywordManager.listKeywords(c.clientId);
+        allJobs.push(...(await clientStorage.listJobsByClient(c.clientId)));
+        allJournal.push(...(await clientStorage.listUpdateJournalByClient(c.clientId)));
+      }
+      const historyRecords = await historyStorage.queryRankingHistory({
+        clientId: p.clientId || null,
+        limit: 5000,
+      });
+      const out = generateAgencyCsvReport({
+        reportType: p.reportType,
+        clients: p.clientId ? clients.filter((c) => c.clientId === p.clientId) : clients,
+        locationsByClient,
+        keywordsByClient,
+        historyRecords,
+        jobs: allJobs,
+        journalEntries: allJournal,
+        accuracyComparisons: p.accuracyComparisons || [],
+      });
+      return { ok: true, ...out };
+    }
+
+    case MESSAGE_TYPES.ACTIVITY_LIST:
+      return {
+        ok: true,
+        logs: await activityLogger.queryLogs(message.payload || {}),
+      };
+
+    case MESSAGE_TYPES.ACTIVITY_EXPORT_CSV: {
+      const logs = await activityLogger.queryLogs(message.payload || {});
+      return {
+        ok: true,
+        filename: "agency-activity-logs.csv",
+        csv: activityLogger.exportLogsAsCsv(logs),
+      };
+    }
+
+    case MESSAGE_TYPES.SETTINGS_GET:
+      return {
+        ok: true,
+        settings: await historyStorage.loadSettings(),
+      };
+
+    case MESSAGE_TYPES.SETTINGS_SAVE:
+      return historyStorage.saveSettings(message.payload || {});
+
+    case MESSAGE_TYPES.DIAGNOSTICS_INFO: {
+      const schemaInfo = await historyStorage.getSchemaInfo();
+      const ping = await storage.pingStorage();
+      return {
+        ok: true,
+        version,
+        storageOk: ping.ok,
+        databaseBackend: schemaInfo.backend,
+        schemaVersion: schemaInfo.version,
+        stores: schemaInfo.stores,
+      };
+    }
 
     default:
       return { ok: false, error: `Unknown message type: ${message.type}` };

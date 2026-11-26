@@ -12,7 +12,7 @@ Each phase is built and verified individually before moving to the next.
 | **Phase 6** | Bulk keyword checking and job management | **Completed (Automated Tests Passed; Manual Chrome Verification Pending)** |
 | **Phase 7** | Multiple client configuration | **Completed (Automated Tests Passed; Manual Chrome Verification Pending)** |
 | **Phase 8** | Google Sheets authentication and reading | **Completed (Automated Tests Passed; Live OAuth & Sheets Verification Pending)** |
-| **Phase 9** | Google Sheets updating with complete design preservation | **Implemented (Automated Tests Passed; Sandbox & Live Verification Pending)** |
-| **Phase 10** | Agency dashboard and ranking history | Pending |
+| **Phase 9** | Google Sheets updating with complete design preservation | **Completed (Automated Tests Passed; Sandbox & Live Verification Pending)** |
+| **Phase 10** | Agency dashboard and ranking history | **Implemented (Automated Tests Passed; Manual Chrome & Live Verification Pending)** |
 | **Phase 11** | Weekly scheduling, recovery and error handling | Pending |
 | **Phase 12** | Final testing and deployment | Pending |

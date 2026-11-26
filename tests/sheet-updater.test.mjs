@@ -101,6 +101,8 @@ test("end-to-end sheetUpdater enforces dry-run/sandbox, backup, structure drift 
   // Live stateful mock Google Sheets server
   let liveDisplay = structuredClone(SAMPLE_DISPLAY_ROWS);
   let liveFormulas = structuredClone(SAMPLE_FORMULA_ROWS);
+  let liveMeta = structuredClone(SAMPLE_METADATA_RESPONSE);
+  let liveGrid = structuredClone(SAMPLE_GRID_DETAILS);
   let batchUpdateCallCount = 0;
 
   const mockFetch = async (url, init = {}) => {
@@ -122,6 +124,22 @@ test("end-to-end sheetUpdater enforces dry-run/sandbox, backup, structure drift 
             return copy;
           });
           liveFormulas[8][8] = "=AVERAGE(I7:I8)";
+          for (const sh of [liveMeta.sheets[1], liveGrid.sheets[0]]) {
+            if (sh.merges) {
+              sh.merges = sh.merges.map((m) => ({
+                ...m,
+                endColumnIndex: m.endColumnIndex > idx ? m.endColumnIndex + 1 : m.endColumnIndex,
+              }));
+            }
+            if (sh.basicFilter?.range && sh.basicFilter.range.endColumnIndex > idx) {
+              sh.basicFilter.range.endColumnIndex += 1;
+            }
+          }
+          liveGrid.sheets[0].data[0].rowData.forEach((rowObj) => {
+            if (rowObj.values.length > idx) {
+              rowObj.values.splice(idx, 0, structuredClone(rowObj.values[idx]));
+            }
+          });
         }
         if (req.updateCells) {
           const { rowIndex, columnIndex } = req.updateCells.start;
@@ -134,15 +152,15 @@ test("end-to-end sheetUpdater enforces dry-run/sandbox, backup, structure drift 
     }
 
     if (url.includes("includeGridData=true")) {
-      return { ok: true, json: async () => SAMPLE_GRID_DETAILS };
+      return { ok: true, json: async () => structuredClone(liveGrid) };
     }
     if (url.includes("valueRenderOption=FORMULA")) {
-      return { ok: true, json: async () => ({ valueRanges: [{ values: liveFormulas }] }) };
+      return { ok: true, json: async () => ({ valueRanges: [{ values: structuredClone(liveFormulas) }] }) };
     }
     if (url.includes("valueRenderOption=FORMATTED_VALUE")) {
-      return { ok: true, json: async () => ({ valueRanges: [{ values: liveDisplay }] }) };
+      return { ok: true, json: async () => ({ valueRanges: [{ values: structuredClone(liveDisplay) }] }) };
     }
-    return { ok: true, json: async () => SAMPLE_METADATA_RESPONSE };
+    return { ok: true, json: async () => structuredClone(liveMeta) };
   };
 
   const authClient = createGoogleAuthClient({
@@ -244,7 +262,7 @@ test("end-to-end sheetUpdater enforces dry-run/sandbox, backup, structure drift 
     mode: UPDATE_MODES.SANDBOX,
     dryRun: false,
   });
-  assert.equal(execOk.ok, true);
+  assert.equal(execOk.ok, true, JSON.stringify({ error: execOk.error, issues: execOk.issues, status: execOk.operationStatus }));
   assert.equal(execOk.operationStatus, OPERATION_STATES.UPDATE_SUCCESSFUL);
   assert.equal(batchUpdateCallCount, 1);
   assert.equal(liveDisplay[5][7], "30-November");

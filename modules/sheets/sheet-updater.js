@@ -193,7 +193,12 @@ export function createSheetUpdater({
     const backupCheck = backupManager.verifyBackupIntegrity(
       backup,
       live.spreadsheetId,
-      live.worksheet.sheetId
+      live.worksheet.sheetId,
+      {
+        expectedClientId: clientId,
+        expectedPlanFingerprint: approvedPreview.planFingerprint,
+        expectedPreWriteFingerprint: live.snapshot?.structureFingerprint || null,
+      }
     );
     if (!backupCheck.valid) {
       return {
@@ -282,7 +287,15 @@ export function createSheetUpdater({
     };
 
     try {
-      await updateJournal.recordOperation(baseOp);
+      const journalStart = await updateJournal.recordOperation(baseOp);
+      if (!journalStart.ok) {
+        return {
+          ok: false,
+          operationStatus: OPERATION_STATES.UPDATE_FAILED,
+          operationId,
+          error: `Journal persistence failed before initiating live write: ${journalStart.error}`,
+        };
+      }
 
       const writeRes = await sheetsWriteClient.executeBatchUpdate({
         spreadsheetId: plan.spreadsheetId,

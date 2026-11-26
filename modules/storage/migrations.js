@@ -3,7 +3,7 @@
  */
 
 export const DATABASE_NAME = "dm_rank_tracker_db";
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 export const STORES = Object.freeze({
   CLIENTS: "clients",
@@ -14,6 +14,9 @@ export const STORES = Object.freeze({
   BACKUPS: "backups",
   SHEET_SNAPSHOTS: "sheet_snapshots",
   UPDATE_JOURNAL: "update_journal",
+  RANKING_HISTORY: "ranking_history",
+  ACTIVITY_LOGS: "activity_logs",
+  SETTINGS: "app_settings",
 });
 
 /**
@@ -66,6 +69,26 @@ export function applyIdbMigrations(db, oldVersion, _newVersion) {
       journalStore.createIndex("by_job", "jobId", { unique: false });
     }
   }
+  if (oldVersion < 4) {
+    if (!db.objectStoreNames.contains(STORES.RANKING_HISTORY)) {
+      const histStore = db.createObjectStore(STORES.RANKING_HISTORY, { keyPath: "resultId" });
+      histStore.createIndex("by_client", "clientId", { unique: false });
+      histStore.createIndex("by_location", "locationId", { unique: false });
+      histStore.createIndex("by_keyword", "keywordId", { unique: false });
+      histStore.createIndex("by_job", "jobId", { unique: false });
+      histStore.createIndex("by_timestamp", "timestamp", { unique: false });
+      histStore.createIndex("by_source", "sourceMode", { unique: false });
+    }
+    if (!db.objectStoreNames.contains(STORES.ACTIVITY_LOGS)) {
+      const logStore = db.createObjectStore(STORES.ACTIVITY_LOGS, { keyPath: "logId" });
+      logStore.createIndex("by_client", "clientId", { unique: false });
+      logStore.createIndex("by_category", "category", { unique: false });
+      logStore.createIndex("by_timestamp", "timestamp", { unique: false });
+    }
+    if (!db.objectStoreNames.contains(STORES.SETTINGS)) {
+      db.createObjectStore(STORES.SETTINGS, { keyPath: "key" });
+    }
+  }
 }
 
 export const DB_SCHEMA_KEY = "dm_db_schema_version";
@@ -83,7 +106,7 @@ export async function ensureFallbackSchema(storageClient, targetVersion = CURREN
     data = {};
   }
 
-  if (currentVersion < 3) {
+  if (currentVersion < 4) {
     for (const storeName of Object.values(STORES)) {
       if (!data[storeName] || typeof data[storeName] !== "object") {
         data[storeName] = {};

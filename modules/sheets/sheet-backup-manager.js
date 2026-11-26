@@ -9,8 +9,144 @@ import { STORES } from "../storage/migrations.js";
 import { createDatabase } from "../storage/database.js";
 import { normalizeWorksheetId } from "./spreadsheet-validator.js";
 
+function computeIntegrityHash(obj) {
+  const str = JSON.stringify(obj);
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i += 1) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  return `${(h2 >>> 0).toString(16).padStart(8, "0")}${(h1 >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function hasSufficientRestorationEvidence(snapshotData) {
+  if (!snapshotData?.sheetProperties || !snapshotData?.gridData) return false;
+  const rows = snapshotData.gridData.rowData || [];
+  const hasDisplay = Array.isArray(snapshotData.displayValues) && snapshotData.displayValues.length > 0;
+  const hasFormula = Array.isArray(snapshotData.formulaValues) && snapshotData.formulaValues.length > 0;
+  if (!hasDisplay || !hasFormula || snapshotData.displayValues.length !== snapshotData.formulaValues.length) {
+    return false;
+  }
+  const hasFormattingEvidence = rows.some((r) =>
+    (r.values || []).some((c) => Boolean(c?.effectiveFormat || c?.userEnteredFormat))
+  );
+  const hasDimensionEvidence =
+    (snapshotData.gridData.columnMetadata || []).length > 0 ||
+    (snapshotData.gridData.rowMetadata || []).length > 0 ||
+    rows.length > 0;
+  return hasFormattingEvidence && hasDimensionEvidence;
+}
+
+export function buildRestoreBatchUpdateRequests(backupRecord) {
+  const snap = backupRecord?.snapshotData;
+  const sheetId = Number(backupRecord?.worksheetId);
+  if (!snap || !Number.isInteger(sheetId) || sheetId < 0) {
+    throw new Error("Valid recoverable backup with snapshotData and numeric worksheetId is required.");
+  }
+
+  const requests = [];
+  const rowCount = snap.displayValues?.length || 0;
+  const colCount = Math.max(
+    ...(snap.displayValues || [[]]).map((r) => r.length),
+    ...(snap.formulaValues || [[]]).map((r) => r.length),
+    1
+  );
+
+  // 1. Restore values, formulas, and user/effective cell formatting across exact captured range
+  const gridRows = [];
+  for (let r = 0; r < rowCount; r += 1) {
+    const dispRow = snap.displayValues[r] || [];
+    const formRow = snap.formulaValues[r] || [];
+    const gridCellRow = snap.gridData?.rowData?.[r]?.values || [];
+    const cellObjs = [];
+    for (let c = 0; c < colCount; c += 1) {
+      const fVal = formRow[c];
+      const dVal = dispRow[c];
+      const cellFormat = gridCellRow[c]?.userEnteredFormat || gridCellRow[c]?.effectiveFormat || undefined;
+      let userEnteredValue;
+      if (typeof fVal === "string" && fVal.startsWith("=")) {
+        userEnteredValue = { formulaValue: fVal };
+      } else if (typeof dVal === "number") {
+        userEnteredValue = { numberValue: dVal };
+      } else if (typeof dVal === "string" && dVal !== "" && /^-?\d+(\.\d+)?$/.test(dVal)) {
+        userEnteredValue = { numberValue: Number(dVal) };
+      } else {
+        userEnteredValue = { stringValue: String(dVal ?? "") };
+      }
+      cellObjs.push({
+        userEnteredValue,
+        ...(cellFormat ? { userEnteredFormat: cellFormat } : {}),
+      });
+    }
+    gridRows.push({ values: cellObjs });
+  }
+
+  requests.push({
+    updateCells: {
+      range: {
+        sheetId,
+        startRowIndex: 0,
+        endRowIndex: rowCount,
+        startColumnIndex: 0,
+        endColumnIndex: colCount,
+      },
+      rows: gridRows,
+      fields: "userEnteredValue,userEnteredFormat",
+    },
+  });
+
+  // 2. Restore column widths & row heights
+  (snap.gridData?.columnMetadata || []).forEach((meta, idx) => {
+    if (meta?.pixelSize) {
+      requests.push({
+        updateDimensionProperties: {
+          range: { sheetId, dimension: "COLUMNS", startIndex: idx, endIndex: idx + 1 },
+          properties: { pixelSize: meta.pixelSize },
+          fields: "pixelSize",
+        },
+      });
+    }
+  });
+  (snap.gridData?.rowMetadata || []).forEach((meta, idx) => {
+    if (meta?.pixelSize) {
+      requests.push({
+        updateDimensionProperties: {
+          range: { sheetId, dimension: "ROWS", startIndex: idx, endIndex: idx + 1 },
+          properties: { pixelSize: meta.pixelSize },
+          fields: "pixelSize",
+        },
+      });
+    }
+  });
+
+  // 3. Restore merges & basicFilter
+  for (const m of snap.merges || []) {
+    requests.push({
+      mergeCells: {
+        range: { ...m, sheetId },
+        mergeType: "MERGE_ALL",
+      },
+    });
+  }
+  if (snap.basicFilter) {
+    requests.push({
+      setBasicFilter: {
+        filter: {
+          ...snap.basicFilter,
+          range: { ...(snap.basicFilter.range || {}), sheetId },
+        },
+      },
+    });
+  }
+
+  return requests;
+}
+
 export function createSheetBackupManager({
   sheetsApiClient,
+  sheetsWriteClient = null,
   storageClient,
   idbFactory = globalThis.indexedDB || null,
 } = {}) {
@@ -22,6 +158,8 @@ export function createSheetBackupManager({
     worksheetId,
     worksheetName,
     jobId = null,
+    approvedPlanFingerprint = null,
+    preWriteSnapshotFingerprint = null,
   } = {}) {
     if (!clientId || !spreadsheetId) {
       return { ok: false, error: "clientId and spreadsheetId are required to create a sheet backup." };
@@ -69,18 +207,28 @@ export function createSheetBackupManager({
     const displayValues = dispRes.data?.valueRanges?.[0]?.values || [];
     const formulaValues = formRes.data?.valueRanges?.[0]?.values || [];
 
-    const hasMetadata = Boolean(metaRes.data?.properties?.title && sheetMeta.properties);
-    const hasGridData = Boolean(gridSheet);
-    const hasValues = displayValues.length > 0 && formulaValues.length > 0;
+    const snapshotData = {
+      sheetProperties: sheetMeta.properties,
+      merges: gridSheet?.merges || sheetMeta.merges || [],
+      protectedRanges: gridSheet?.protectedRanges || sheetMeta.protectedRanges || [],
+      basicFilter: gridSheet?.basicFilter || sheetMeta.basicFilter || null,
+      filterViews: gridSheet?.filterViews || sheetMeta.filterViews || [],
+      conditionalFormats: gridSheet?.conditionalFormats || sheetMeta.conditionalFormats || [],
+      gridData: gridSheet?.data?.[0] || null,
+      displayValues,
+      formulaValues,
+    };
 
-    if (!hasMetadata || !hasGridData || !hasValues) {
+    if (!metaRes.data?.properties?.title || !hasSufficientRestorationEvidence(snapshotData)) {
       return {
         ok: false,
         verificationStatus: "FAILED",
-        error: "Recoverable spreadsheet backup verification failed: grid formatting, metadata, or values were incomplete.",
+        error:
+          "Recoverable spreadsheet backup verification failed: insufficient formatting, grid metadata, or matched display/formula evidence.",
       };
     }
 
+    const contentIntegrityHash = computeIntegrityHash(snapshotData);
     const backupId = `sbkp_${clientId}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const record = {
       backupId,
@@ -91,26 +239,19 @@ export function createSheetBackupManager({
       worksheetId: normalizeWorksheetId(sheetMeta.properties.sheetId),
       worksheetName: title,
       jobId,
+      approvedPlanFingerprint,
+      preWriteSnapshotFingerprint,
+      contentIntegrityHash,
       createdAt: new Date().toISOString(),
       verificationStatus: "VERIFIED",
       locale: metaRes.data?.properties?.locale || "",
       timeZone: metaRes.data?.properties?.timeZone || "",
       restoreInstructions: [
-        "1. Open the target Google Sheet and check Version History (File -> Version history) or use this extension snapshot.",
+        "1. Open the target Google Sheet and check Version History (File -> Version history) or use this verified extension snapshot.",
         "2. Do NOT overwrite collaborator edits automatically without reviewing row changes.",
-        "3. Apply targeted row/column restoration via the extension Recovery tool if verification failed.",
+        "3. Apply targeted restoration requests generated by buildRestoreBatchUpdateRequests if verification failed.",
       ],
-      snapshotData: {
-        sheetProperties: sheetMeta.properties,
-        merges: gridSheet.merges || sheetMeta.merges || [],
-        protectedRanges: gridSheet.protectedRanges || sheetMeta.protectedRanges || [],
-        basicFilter: gridSheet.basicFilter || sheetMeta.basicFilter || null,
-        filterViews: gridSheet.filterViews || sheetMeta.filterViews || [],
-        conditionalFormats: gridSheet.conditionalFormats || sheetMeta.conditionalFormats || [],
-        gridData: gridSheet.data?.[0] || null,
-        displayValues,
-        formulaValues,
-      },
+      snapshotData,
     };
 
     if (db) {
@@ -140,12 +281,20 @@ export function createSheetBackupManager({
       .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
   }
 
-  function verifyBackupIntegrity(backupRecord, expectedSpreadsheetId, expectedWorksheetId) {
+  function verifyBackupIntegrity(
+    backupRecord,
+    expectedSpreadsheetId,
+    expectedWorksheetId,
+    { expectedClientId = null, expectedPlanFingerprint = null, expectedPreWriteFingerprint = null } = {}
+  ) {
     if (!backupRecord) {
       return { valid: false, error: "Mandatory verified backup is missing." };
     }
     if (backupRecord.verificationStatus !== "VERIFIED") {
       return { valid: false, error: `Backup '${backupRecord.backupId}' verification status is '${backupRecord.verificationStatus}'.` };
+    }
+    if (expectedClientId && backupRecord.clientId !== expectedClientId) {
+      return { valid: false, error: `Backup belongs to client '${backupRecord.clientId}', expected '${expectedClientId}'.` };
     }
     if (backupRecord.spreadsheetId !== expectedSpreadsheetId) {
       return { valid: false, error: "Backup belongs to a different spreadsheet ID." };
@@ -153,10 +302,72 @@ export function createSheetBackupManager({
     if (normalizeWorksheetId(backupRecord.worksheetId) !== normalizeWorksheetId(expectedWorksheetId)) {
       return { valid: false, error: "Backup belongs to a different worksheet ID." };
     }
-    if (!backupRecord.snapshotData?.formulaValues?.length || !backupRecord.snapshotData?.gridData) {
-      return { valid: false, error: "Backup is missing full grid/formula state." };
+    if (
+      expectedPlanFingerprint &&
+      backupRecord.approvedPlanFingerprint &&
+      backupRecord.approvedPlanFingerprint !== expectedPlanFingerprint
+    ) {
+      return { valid: false, error: "Backup does not match the currently approved update plan fingerprint." };
+    }
+    if (
+      expectedPreWriteFingerprint &&
+      backupRecord.preWriteSnapshotFingerprint &&
+      backupRecord.preWriteSnapshotFingerprint !== expectedPreWriteFingerprint
+    ) {
+      return { valid: false, error: "Backup was captured against an outdated pre-write sheet structure." };
+    }
+    if (!hasSufficientRestorationEvidence(backupRecord.snapshotData)) {
+      return { valid: false, error: "Backup lacks full recoverable grid formatting and value/formula restoration evidence." };
+    }
+    const recomputedHash = computeIntegrityHash(backupRecord.snapshotData);
+    if (backupRecord.contentIntegrityHash && backupRecord.contentIntegrityHash !== recomputedHash) {
+      return { valid: false, error: "Backup content integrity check failed (hash mismatch / corrupted snapshot)." };
     }
     return { valid: true };
+  }
+
+  async function restoreFromBackup({
+    backupRecord,
+    writeClient = sheetsWriteClient,
+    mode = "dry-run",
+    dryRun = true,
+    confirmedByUser = false,
+  } = {}) {
+    if (!backupRecord) {
+      return { ok: false, error: "Backup record is required for restoration." };
+    }
+    const integrity = verifyBackupIntegrity(
+      backupRecord,
+      backupRecord.spreadsheetId,
+      backupRecord.worksheetId,
+      { expectedClientId: backupRecord.clientId }
+    );
+    if (!integrity.valid) {
+      return { ok: false, error: integrity.error };
+    }
+
+    const requests = buildRestoreBatchUpdateRequests(backupRecord);
+    if (dryRun || mode === "dry-run" || !confirmedByUser) {
+      return {
+        ok: true,
+        dryRun: true,
+        requestsCount: requests.length,
+        requests,
+        message: "Restoration plan verified (dry-run). Confirm explicitly to apply restore.",
+      };
+    }
+
+    if (!writeClient) {
+      return { ok: false, error: "sheetsWriteClient is required for live backup restoration." };
+    }
+
+    const writeRes = await writeClient.executeBatchUpdate({
+      spreadsheetId: backupRecord.spreadsheetId,
+      requests,
+      mode,
+      dryRun: false,
+    });
+    return writeRes;
   }
 
   return {
@@ -164,6 +375,7 @@ export function createSheetBackupManager({
     getBackup,
     listBackupsForClient,
     verifyBackupIntegrity,
+    restoreFromBackup,
   };
 }
 

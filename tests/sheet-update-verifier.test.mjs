@@ -67,6 +67,11 @@ test("verifyPostUpdateSpreadsheet verifies shifted columns, date headers, ranks,
   // Simulated Google Sheets automatic relative formula shift H7:H8 -> I7:I8
   postFormulas[8][8] = "=AVERAGE(I7:I8)";
 
+  const shiftedMerges = SAMPLE_METADATA_RESPONSE.sheets[1].merges.map((m) => ({
+    ...m,
+    endColumnIndex: m.endColumnIndex > 7 ? m.endColumnIndex + 1 : m.endColumnIndex,
+  }));
+
   const postStruct = detectSheetStructure({
     spreadsheetId: FICTIONAL_SPREADSHEET_ID,
     worksheetId: FICTIONAL_WORKSHEET_ID,
@@ -75,7 +80,7 @@ test("verifyPostUpdateSpreadsheet verifies shifted columns, date headers, ranks,
     timeZone: "Australia/Sydney",
     displayRows: postDisplay,
     formulaRows: postFormulas,
-    merges: SAMPLE_METADATA_RESPONSE.sheets[1].merges,
+    merges: shiftedMerges,
     hasFilter: true,
     conditionalFormats: [{ booleanRule: {} }],
   });

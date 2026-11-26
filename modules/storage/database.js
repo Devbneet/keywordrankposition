@@ -39,6 +39,12 @@ function getKeyFieldForStore(storeName) {
       return "snapshotKey";
     case STORES.UPDATE_JOURNAL:
       return "operationId";
+    case STORES.RANKING_HISTORY:
+      return "resultId";
+    case STORES.ACTIVITY_LOGS:
+      return "logId";
+    case STORES.SETTINGS:
+      return "key";
     default:
       return "id";
   }
@@ -146,6 +152,10 @@ export function createDatabase({
       by_status: "status",
       by_name: "clientName",
       by_spreadsheet: "spreadsheetId",
+      by_keyword: "keywordId",
+      by_timestamp: "timestamp",
+      by_source: "sourceMode",
+      by_category: "category",
     };
     const field = fieldMap[indexName] || indexName;
     return all.filter((item) => item?.[field] === indexValue);

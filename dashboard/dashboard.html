@@ -3,1248 +3,980 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Digital Minds Rank Tracker — Dashboard</title>
+    <title>Digital Minds Rank Tracker — Agency Workspace</title>
     <link rel="stylesheet" href="dashboard.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div class="topbar-inner">
-        <div class="brand">
-          <span class="brand-badge">DM</span>
-          <div>
-            <h1>Digital Minds Rank Tracker</h1>
-            <p class="subtitle">Manifest V3 Chrome Extension — Agency Workspace</p>
+    <div class="app-shell">
+      <aside id="app-sidebar" class="sidebar" aria-label="Primary Sidebar Navigation">
+        <div class="sidebar-brand">
+          <div class="brand">
+            <span class="brand-badge">DM</span>
+            <div class="brand-text">
+              <strong style="font-size: 14px; color: #fff;">Digital Minds</strong>
+              <div style="font-size: 11px; color: #94a3b8;">Rank Tracker</div>
+            </div>
           </div>
+          <button id="btn-sidebar-toggle" class="btn-outline btn-compact" type="button" title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
         </div>
-          <div class="meta-badges">
-          <span class="version-chip">v<span id="dash-version">-</span></span>
-          <span id="dash-phase-chip" class="phase-chip">Phase 9: Google Sheets Format-Preserving Updates</span>
-        </div>
-      </div>
-    </header>
 
-    <main class="container">
-      <section class="card clients-card">
-        <div class="card-header">
+        <nav id="sidebar-nav" class="sidebar-nav">
+          <button type="button" class="nav-item active" data-nav="overview"><span class="nav-label">Overview</span></button>
+          <button type="button" class="nav-item" data-nav="clients"><span class="nav-label">Clients</span></button>
+          <button type="button" class="nav-item" data-nav="keyword-rankings"><span class="nav-label">Keyword Rankings</span></button>
+          <button type="button" class="nav-item" data-nav="ranking-history"><span class="nav-label">Ranking History</span></button>
+          <button type="button" class="nav-item" data-nav="google-sheets"><span class="nav-label">Google Sheets</span></button>
+          <button type="button" class="nav-item" data-nav="jobs"><span class="nav-label">Jobs &amp; Checks</span></button>
+          <button type="button" class="nav-item" data-nav="accuracy-lab"><span class="nav-label">Ranking Accuracy Lab</span></button>
+          <button type="button" class="nav-item" data-nav="reports"><span class="nav-label">Reports</span></button>
+          <button type="button" class="nav-item" data-nav="activity-logs"><span class="nav-label">Activity Logs</span></button>
+          <button type="button" class="nav-item" data-nav="settings"><span class="nav-label">Settings</span></button>
+          <button type="button" class="nav-item" data-nav="help"><span class="nav-label">Help &amp; Docs</span></button>
+          <button type="button" class="nav-item" data-nav="scheduled-checks" disabled aria-disabled="true">
+            <span class="nav-label">Scheduled Checks</span>
+            <span class="soon-tag">Phase 11</span>
+          </button>
+        </nav>
+      </aside>
+
+      <div class="workspace-shell">
+        <header class="saas-topbar">
           <div>
-            <h2>Digital Minds — Clients</h2>
-            <p class="muted">
-              Manage agency client profiles, locations, saved keywords, and Google Sheet mappings. Switching clients resets active location verification safely.
-            </p>
+            <strong style="font-size: 16px;">Digital Minds Rank Tracker</strong>
+            <span id="dash-phase-chip" class="phase-chip" style="margin-left: 8px;">Phase 10 Agency Dashboard</span>
           </div>
-          <div class="header-actions-inline">
+          <div class="topbar-controls">
+            <select id="topbar-client-select" class="topbar-client-select" aria-label="Quick client switcher">
+              <option value="">Switch client...</option>
+            </select>
             <span id="active-client-pill" class="pill pill-neutral">No Active Client</span>
-            <button id="btn-client-new" class="btn-navy btn-compact" type="button">+ Add Client</button>
+            <span class="version-chip">v<span id="dash-version">-</span></span>
           </div>
-        </div>
+        </header>
 
-        <div class="filter-bar">
-          <input id="client-search-input" type="text" placeholder="Search clients by name, domain, or ID..." autocomplete="off" />
-          <label class="checkbox-inline">
-            <input id="client-show-archived" type="checkbox" checked />
-            Show archived
-          </label>
-          <label class="btn-outline btn-compact file-btn">
-            Import Client JSON
-            <input id="client-import-file" type="file" accept=".json" hidden />
-          </label>
-          <button id="btn-client-export" class="btn-outline btn-compact" type="button" disabled>Export Client</button>
-        </div>
-
-        <div id="client-feedback" class="feedback-banner hidden" role="alert"></div>
-
-        <div id="client-cards-grid" class="client-cards-grid"></div>
-
-        <div id="client-editor-panel" class="status-panel hidden">
-          <h3 id="client-editor-title">Add Client</h3>
-          <form id="client-editor-form" class="location-form" novalidate>
-            <input id="cli-id" type="hidden" />
-            <div class="form-grid-3">
-              <div class="form-row">
-                <label for="cli-name">Client name</label>
-                <input id="cli-name" type="text" placeholder="e.g. Acme Plumbing" />
+        <main class="pages-host">
+          <!-- PAGE: OVERVIEW -->
+          <div class="page-view" data-page="overview">
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2>Agency Overview</h2>
+                  <p class="muted">Real-time portfolio metrics computed exclusively from stored ranking history and client data.</p>
+                </div>
+                <div class="actions">
+                  <button id="btn-ov-refresh" class="btn-outline btn-compact" type="button">Refresh Stats</button>
+                  <button id="btn-ov-google-sheets" class="btn-outline btn-compact" type="button">Google Sheets</button>
+                  <button id="btn-ov-start-check" class="btn-navy btn-compact" type="button">Start Ranking Check</button>
+                </div>
               </div>
-              <div class="form-row">
-                <label for="cli-domain">Website domain</label>
-                <input id="cli-domain" type="text" placeholder="e.g. acmeplumbing.com.au" />
+
+              <div id="ov-kpi-grid" class="kpi-grid-4"></div>
+              <div id="ov-secondary-kpi-grid" class="kpi-grid-compact"></div>
+              <div id="ov-empty-notice" class="empty-state hidden" style="margin-bottom: 14px;">
+                No verified ranking history stored yet. Select a client, verify browser location, and start your first ranking check.
               </div>
-              <div class="form-row">
-                <label for="cli-status">Status</label>
-                <select id="cli-status">
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                  <option value="archived">Archived</option>
+
+              <h3>Keyword Ranking Distribution</h3>
+              <div id="ov-distribution-chart" class="dist-chart" style="margin: 10px 0 20px;"></div>
+
+              <h3>Recent Ranking Movement</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Keyword</th>
+                      <th>Previous</th>
+                      <th>Current</th>
+                      <th>Change</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ov-movements-tbody"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <!-- PAGE: CLIENTS -->
+          <div class="page-view hidden" data-page="clients">
+            <section class="card clients-card">
+              <div class="card-header">
+                <div>
+                  <h2>Digital Minds — Clients</h2>
+                  <p class="muted">
+                    Manage agency client profiles, locations, saved keywords, and Google Sheet mappings. Switching clients safely resets active browser location verification.
+                  </p>
+                </div>
+                <div class="header-actions-inline">
+                  <button id="btn-client-new" class="btn-navy btn-compact" type="button">+ Add Client</button>
+                </div>
+              </div>
+
+              <div class="filter-bar">
+                <input id="client-search-input" type="text" placeholder="Search clients by name, domain, or ID..." autocomplete="off" />
+                <label class="checkbox-inline">
+                  <input id="client-show-archived" type="checkbox" checked />
+                  Show archived
+                </label>
+                <label class="btn-outline btn-compact file-btn">
+                  Import Client JSON
+                  <input id="client-import-file" type="file" accept=".json" hidden />
+                </label>
+                <button id="btn-client-export" class="btn-outline btn-compact" type="button" disabled>Export Client</button>
+              </div>
+
+              <div id="client-feedback" class="feedback-banner hidden" role="alert"></div>
+              <div id="client-cards-grid" class="client-cards-grid"></div>
+
+              <div id="client-editor-panel" class="status-panel hidden">
+                <h3 id="client-editor-title">Add Client</h3>
+                <form id="client-editor-form" class="location-form" novalidate>
+                  <input id="cli-id" type="hidden" />
+                  <div class="form-grid-3">
+                    <div class="form-row">
+                      <label for="cli-name">Client name</label>
+                      <input id="cli-name" type="text" placeholder="e.g. Acme Plumbing" />
+                    </div>
+                    <div class="form-row">
+                      <label for="cli-domain">Website domain</label>
+                      <input id="cli-domain" type="text" placeholder="e.g. acmeplumbing.com.au" />
+                    </div>
+                    <div class="form-row">
+                      <label for="cli-status">Status</label>
+                      <select id="cli-status">
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                        <option value="archived">Archived</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-grid-2">
+                    <div class="form-row">
+                      <label for="cli-url">Website URL</label>
+                      <input id="cli-url" type="url" placeholder="https://acmeplumbing.com.au/" />
+                    </div>
+                    <div class="form-row">
+                      <label for="cli-notes">Client notes</label>
+                      <input id="cli-notes" type="text" placeholder="Optional internal notes" />
+                    </div>
+                  </div>
+
+                  <div class="action-group google-group">
+                    <span class="action-group-label">Google Sheet Mapping</span>
+                    <div class="form-grid-2">
+                      <div class="form-row">
+                        <label for="cli-sheet-url">Google Sheet URL</label>
+                        <input id="cli-sheet-url" type="url" placeholder="https://docs.google.com/spreadsheets/d/..." />
+                      </div>
+                      <div class="form-row">
+                        <label for="cli-sheet-id">Spreadsheet ID</label>
+                        <input id="cli-sheet-id" type="text" placeholder="Auto-extracted from URL" />
+                      </div>
+                    </div>
+                    <div class="form-grid-2">
+                      <div class="form-row">
+                        <label for="cli-ws-name">Worksheet name</label>
+                        <input id="cli-ws-name" type="text" value="Keywords" />
+                      </div>
+                      <div class="form-row">
+                        <label for="cli-ws-id">Worksheet ID (gid)</label>
+                        <input id="cli-ws-id" type="text" placeholder="Optional gid" />
+                      </div>
+                    </div>
+                    <div class="form-grid-6">
+                      <div class="form-row"><label for="cli-col-kw">Keyword Col</label><input id="cli-col-kw" type="text" value="C" /></div>
+                      <div class="form-row"><label for="cli-col-vol">Volume Col</label><input id="cli-col-vol" type="text" value="D" /></div>
+                      <div class="form-row"><label for="cli-col-comp">Comp Col</label><input id="cli-col-comp" type="text" value="E" /></div>
+                      <div class="form-row"><label for="cli-col-lp">Landing Col</label><input id="cli-col-lp" type="text" value="F" /></div>
+                      <div class="form-row"><label for="cli-col-serp">SERP Col</label><input id="cli-col-serp" type="text" value="G" /></div>
+                      <div class="form-row"><label for="cli-col-date">Date Col</label><input id="cli-col-date" type="text" value="H" /></div>
+                    </div>
+                  </div>
+                  <div class="button-bar">
+                    <button class="btn-navy" type="submit">Save Client</button>
+                    <button id="btn-client-cancel" class="btn-outline btn-reset" type="button">Cancel</button>
+                  </div>
+                </form>
+              </div>
+
+              <div id="active-client-workspace" class="status-panel hidden">
+                <div class="action-group-header" style="margin-bottom: 12px;">
+                  <h3 id="ws-client-heading">Client Dashboard</h3>
+                  <div class="actions">
+                    <button id="btn-cli-qa-check" class="btn-navy btn-compact" type="button">Check Rankings</button>
+                    <button id="btn-cli-qa-verify" class="btn-outline btn-compact" type="button">Verify Location</button>
+                    <button id="btn-cli-qa-sheet" class="btn-outline btn-compact" type="button">Open Google Sheet</button>
+                    <button id="btn-cli-qa-history" class="btn-outline btn-compact" type="button">View Ranking History</button>
+                    <button id="btn-cli-qa-edit" class="btn-outline btn-compact" type="button">Edit Client</button>
+                    <button id="btn-client-backup" class="btn-outline btn-compact" type="button">Local Backup</button>
+                    <button id="btn-client-load-bulk" class="btn-primary btn-compact" type="button">Load Keywords into Bulk</button>
+                  </div>
+                </div>
+
+                <div id="cli-dash-metrics" class="kpi-grid-compact"></div>
+                <div id="cli-dash-distribution" class="dist-chart" style="margin-bottom: 16px;"></div>
+
+                <div class="form-grid-2">
+                  <div class="action-group">
+                    <span class="action-group-label">Client Locations</span>
+                    <div id="cli-locations-list" class="mini-list"></div>
+                    <div class="form-grid-2" style="margin-top: 8px;">
+                      <input id="cli-loc-name" class="inline-input" type="text" placeholder="Location name (e.g. Sydney)" />
+                      <input id="cli-loc-coords" class="inline-input" type="text" placeholder="-33.8688, 151.2093" />
+                    </div>
+                    <div class="form-grid-3" style="margin-top: 6px;">
+                      <input id="cli-loc-state" class="inline-input" type="text" placeholder="State/Region (NSW)" />
+                      <input id="cli-loc-ws" class="inline-input" type="text" placeholder="Worksheet (optional)" />
+                      <input id="cli-loc-col" class="inline-input" type="text" placeholder="Date col (e.g. H)" />
+                    </div>
+                    <button id="btn-cli-add-loc" class="btn-outline" type="button" style="margin-top: 8px;">Add Location to Client</button>
+                  </div>
+
+                  <div class="action-group">
+                    <span class="action-group-label">Client Keywords (<span id="cli-kw-count">0</span>)</span>
+                    <textarea id="cli-kw-paste" rows="3" placeholder="Paste client keywords (one per line)..."></textarea>
+                    <div class="actions" style="margin-top: 6px;">
+                      <button id="btn-cli-add-kws" class="btn-outline" type="button">Save Keywords</button>
+                      <label class="btn-outline file-btn" style="padding: 8px 12px;">
+                        Import CSV
+                        <input id="cli-kw-csv-file" type="file" accept=".csv" hidden />
+                      </label>
+                    </div>
+                    <div id="cli-keywords-list" class="mini-list" style="margin-top: 8px;"></div>
+                  </div>
+                </div>
+
+                <h3 class="subtable-title">Client Ranking History (Isolated)</h3>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Keyword</th>
+                        <th>Position</th>
+                        <th>Status</th>
+                        <th>URL</th>
+                        <th>Checked</th>
+                        <th>Google Loc</th>
+                      </tr>
+                    </thead>
+                    <tbody id="cli-history-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- PAGE: KEYWORD RANKINGS -->
+          <div class="page-view hidden" data-page="keyword-rankings">
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2>Keyword Rankings</h2>
+                  <p class="muted">Compare previous vs current live organic positions. Failed checks remain clearly excluded from loss counts.</p>
+                </div>
+                <button id="btn-kr-refresh" class="btn-outline btn-compact" type="button">Refresh</button>
+              </div>
+
+              <div class="filter-bar">
+                <input id="kr-search" type="text" placeholder="Search keyword or ranking URL..." />
+                <select id="kr-client-filter"><option value="">All Clients</option></select>
+                <select id="kr-location-filter"><option value="">All Locations</option></select>
+                <select id="kr-group-filter"><option value="">All Groups</option></select>
+                <input id="kr-date-filter" type="date" aria-label="Filter by check date" />
+                <select id="kr-pos-filter">
+                  <option value="">All Positions</option>
+                  <option value="top3">Top 3</option>
+                  <option value="top10">Top 10</option>
+                  <option value="top20">Top 20</option>
+                  <option value="top100">Top 100</option>
+                  <option value="na">Confirmed Not Found</option>
+                </select>
+                <select id="kr-movement-filter">
+                  <option value="">All Movements</option>
+                  <option value="Improved">Improved</option>
+                  <option value="Declined">Declined</option>
+                  <option value="Unchanged">Unchanged</option>
+                  <option value="New ranking">New ranking</option>
+                  <option value="Lost ranking">Lost ranking</option>
+                  <option value="Failed / Skipped">Failed checks</option>
+                </select>
+                <select id="kr-sort">
+                  <option value="recent">Sort: Most recent</option>
+                  <option value="rank_asc">Sort: Best rank</option>
+                  <option value="rank_desc">Sort: Lowest rank</option>
+                  <option value="change_desc">Sort: Biggest improvement</option>
+                  <option value="keyword_asc">Sort: Keyword A–Z</option>
                 </select>
               </div>
-            </div>
 
-            <div class="form-grid-2">
-              <div class="form-row">
-                <label for="cli-url">Website URL</label>
-                <input id="cli-url" type="url" placeholder="https://acmeplumbing.com.au/" />
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Keyword</th>
+                      <th>Group</th>
+                      <th>Volume</th>
+                      <th>Comp</th>
+                      <th>Landing Page</th>
+                      <th>Prev</th>
+                      <th>Current</th>
+                      <th>Change</th>
+                      <th>Actual URL</th>
+                      <th>Location</th>
+                      <th>Verified</th>
+                      <th>Last Checked</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="kr-tbody"></tbody>
+                </table>
               </div>
-              <div class="form-row">
-                <label for="cli-notes">Client notes</label>
-                <input id="cli-notes" type="text" placeholder="Optional internal notes" />
-              </div>
-            </div>
-
-            <div class="action-group">
-              <span class="action-group-label">Google Sheet Configuration (Saved Only — No Live Access in Phase 7)</span>
-              <div class="form-grid-4">
-                <div class="form-row">
-                  <label for="cli-sheet-url">Google Sheet URL</label>
-                  <input id="cli-sheet-url" type="url" placeholder="https://docs.google.com/spreadsheets/d/..." />
-                </div>
-                <div class="form-row">
-                  <label for="cli-sheet-id">Spreadsheet ID</label>
-                  <input id="cli-sheet-id" type="text" placeholder="Auto-extracted from URL" />
-                </div>
-                <div class="form-row">
-                  <label for="cli-ws-name">Worksheet name</label>
-                  <input id="cli-ws-name" type="text" value="Keywords" />
-                </div>
-                <div class="form-row">
-                  <label for="cli-ws-id">Worksheet ID</label>
-                  <input id="cli-ws-id" type="text" placeholder="Optional gid" />
-                </div>
-              </div>
-              <div class="form-grid-6">
-                <div class="form-row"><label for="cli-col-kw">Keyword Col</label><input id="cli-col-kw" type="text" value="C" /></div>
-                <div class="form-row"><label for="cli-col-vol">Volume Col</label><input id="cli-col-vol" type="text" value="D" /></div>
-                <div class="form-row"><label for="cli-col-comp">Comp Col</label><input id="cli-col-comp" type="text" value="E" /></div>
-                <div class="form-row"><label for="cli-col-lp">Landing Col</label><input id="cli-col-lp" type="text" value="F" /></div>
-                <div class="form-row"><label for="cli-col-serp">SERP Col</label><input id="cli-col-serp" type="text" value="G" /></div>
-                <div class="form-row"><label for="cli-col-date">Date Col</label><input id="cli-col-date" type="text" value="H" /></div>
-              </div>
-            </div>
-
-            <div class="button-bar">
-              <button class="btn-navy" type="submit">Save Client</button>
-              <button id="btn-client-cancel" class="btn-outline btn-reset" type="button">Cancel</button>
-            </div>
-          </form>
-        </div>
-
-        <div id="active-client-workspace" class="status-panel hidden">
-          <div class="action-group-header">
-            <h3 id="ws-client-heading">Active Client Workspace</h3>
-            <div class="button-bar">
-              <button id="btn-client-backup" class="btn-outline btn-compact" type="button">Create Local Backup</button>
-              <button id="btn-client-load-bulk" class="btn-primary btn-compact" type="button">Load Client Keywords into Bulk Checker</button>
-            </div>
+              <div id="kr-pagination" class="pagination-bar"></div>
+            </section>
           </div>
 
-          <div class="grid">
-            <div class="action-group">
-              <span class="action-group-label">Client Locations</span>
-              <div id="cli-locations-list" class="mini-list"></div>
-              <div class="form-grid-2">
-                <input id="cli-loc-name" class="inline-input" type="text" placeholder="Location name (e.g. Sydney)" />
-                <input id="cli-loc-coords" class="inline-input" type="text" placeholder="-33.8688, 151.2093" />
+          <!-- PAGE: RANKING HISTORY -->
+          <div class="page-view hidden" data-page="ranking-history">
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2>Ranking History &amp; Trend Charts</h2>
+                  <p class="muted">Unified historical ranking database. Position #1 plots at the top; failed/missing checks show explicit breaks.</p>
+                </div>
+                <button id="btn-rh-export" class="btn-outline btn-compact" type="button">Export History CSV</button>
               </div>
-              <div class="form-grid-3">
-                <input id="cli-loc-state" class="inline-input" type="text" placeholder="State/Region (NSW)" />
-                <input id="cli-loc-ws" class="inline-input" type="text" placeholder="Worksheet (optional)" />
-                <input id="cli-loc-col" class="inline-input" type="text" placeholder="Date col (e.g. H)" />
-              </div>
-              <button id="btn-cli-add-loc" class="btn-outline" type="button">Add Location to Client</button>
-            </div>
 
-            <div class="action-group">
-              <span class="action-group-label">Client Keywords (<span id="cli-kw-count">0</span>)</span>
-              <textarea id="cli-kw-paste" rows="3" placeholder="Paste client keywords (one per line)..."></textarea>
-              <div class="button-bar">
-                <button id="btn-cli-add-kws" class="btn-outline" type="button">Save Keywords to Client</button>
-                <label class="btn-outline btn-compact file-btn">
-                  Import CSV
-                  <input id="cli-kw-csv-file" type="file" accept=".csv" hidden />
+              <div class="filter-bar">
+                <select id="rh-client-select"><option value="">All Clients</option></select>
+                <select id="rh-location-select"><option value="">All Locations</option></select>
+                <input id="rh-keyword-input" type="text" placeholder="Filter exact keyword for trend chart..." />
+                <input id="rh-date-from" type="date" />
+                <input id="rh-date-to" type="date" />
+                <button id="btn-rh-load" class="btn-navy btn-compact" type="button">Load History</button>
+              </div>
+
+              <div id="rh-trend-chart" style="margin-bottom: 18px;"></div>
+
+              <h3>Compare Two Reporting Dates</h3>
+              <div class="filter-bar">
+                <input id="rh-compare-a" type="date" />
+                <input id="rh-compare-b" type="date" />
+                <button id="btn-rh-compare-dates" class="btn-outline btn-compact" type="button">Compare Dates</button>
+              </div>
+              <div class="table-wrap" style="margin-bottom: 18px;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Keyword</th>
+                      <th>Date A</th>
+                      <th>Date B</th>
+                      <th>Movement</th>
+                      <th>Ranking URL</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rh-compare-tbody"></tbody>
+                </table>
+              </div>
+
+              <h3>Historical Observations</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Keyword</th>
+                      <th>Result</th>
+                      <th>URL</th>
+                      <th>Location</th>
+                      <th>Verification</th>
+                      <th>Source</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rh-history-tbody"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <!-- PAGE: GOOGLE SHEETS (CONSOLIDATED PHASE 8 + 9 HUB) -->
+          <div class="page-view hidden" data-page="google-sheets">
+            <section class="card sheets-card">
+              <div class="card-header">
+                <div>
+                  <h2>Google Sheets Integration (Read &amp; Keyword Import)</h2>
+                  <p class="muted">
+                    Authenticate via Chrome Identity API. Default scope is read-only; structure detection preserves groups, formulas, merges, and formatting.
+                  </p>
+                </div>
+                <span id="sheets-auth-pill" class="pill pill-neutral">Disconnected</span>
+              </div>
+
+              <div class="context-summary-grid">
+                <div class="summary-chip"><span class="summary-label">OAuth Config Status</span><span id="sheets-oauth-status" class="summary-val">Checking...</span></div>
+                <div class="summary-chip"><span class="summary-label">Authentication Status</span><span id="sheets-auth-status" class="summary-val">-</span></div>
+                <div class="summary-chip"><span class="summary-label">Last Connected</span><span id="sheets-last-connected" class="summary-val">Never</span></div>
+                <div class="summary-chip"><span class="summary-label">Active Client Sheet</span><span id="sheets-ctx-client" class="summary-val">No Active Client</span></div>
+              </div>
+
+              <div class="button-bar" style="margin-bottom: 12px;">
+                <button id="btn-sheets-connect" class="btn-navy btn-compact" type="button">Connect Google Account</button>
+                <button id="btn-sheets-disconnect" class="btn-outline btn-compact" type="button">Disconnect Google Account</button>
+                <button id="btn-sheets-test" class="btn-outline btn-compact" type="button">Test Connection</button>
+              </div>
+              <div id="sheets-feedback" class="feedback-banner hidden" role="alert"></div>
+
+              <div class="location-form">
+                <div class="form-grid-3">
+                  <div class="form-row"><label for="sheets-url-input">Google Sheet URL</label><input id="sheets-url-input" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0" /></div>
+                  <div class="form-row"><label for="sheets-id-input">Spreadsheet ID</label><input id="sheets-id-input" type="text" placeholder="Auto-extracted ID" /></div>
+                  <div class="form-row"><label for="sheets-ws-select">Worksheet</label><select id="sheets-ws-select"><option value="">Load worksheets first...</option></select></div>
+                </div>
+                <div class="button-bar">
+                  <button id="btn-sheets-load-ws" class="btn-outline" type="button">Load Worksheets</button>
+                  <button id="btn-sheets-preview" class="btn-primary" type="button">Preview &amp; Read Sheet</button>
+                  <button id="btn-sheets-refresh" class="btn-outline" type="button">Refresh &amp; Compare</button>
+                  <button id="btn-sheets-confirm-import" class="btn-navy" type="button" disabled>Confirm Import Keywords</button>
+                </div>
+              </div>
+
+              <div id="sheets-preview-panel" class="status-panel hidden">
+                <h3 id="sheets-preview-heading">Spreadsheet Structure Preview</h3>
+                <div class="metrics-grid">
+                  <div class="summary-chip"><span class="summary-label">Total Rows</span><span id="sh-m-total" class="summary-val">0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Groups</span><span id="sh-m-groups" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Headers</span><span id="sh-m-headers" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Separators</span><span id="sh-m-separators" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Latest Date</span><span id="sh-m-latest-date" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">History Cols</span><span id="sh-m-history-cols" class="summary-val">0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Formulas / Merges</span><span id="sh-m-meta" class="summary-val">0 / 0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Skipped / Warnings</span><span id="sh-m-warnings" class="summary-val">0</span></div>
+                </div>
+                <div id="sheets-sync-diff-banner" class="feedback-banner hidden"></div>
+                <label id="sheets-ambiguous-confirm-row" class="checkbox-inline hidden" style="margin: 8px 0;">
+                  <input id="sheets-ambiguous-confirm-chk" type="checkbox" />
+                  Confirm ambiguous rows as keywords.
+                </label>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Exclude</th><th>Row #</th><th>Keyword</th><th>Volume</th><th>Comp</th><th>Landing Page</th><th>SERP URL</th><th>Latest Rank</th><th>Group</th></tr></thead>
+                    <tbody id="sheets-preview-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <section class="card sheets-update-card">
+              <div class="card-header">
+                <div>
+                  <h2>Google Sheets Atomic Updates (Design-Preserving)</h2>
+                  <p class="muted">Inserts one new ranking date column after SERP preserving all historical columns, formatting, formulas, and statistics.</p>
+                </div>
+                <span id="upd-status-pill" class="pill pill-neutral">Ready</span>
+              </div>
+              <div class="location-form">
+                <div class="form-grid-3">
+                  <div class="form-row"><label for="upd-client-select">Select Client</label><select id="upd-client-select"><option value="">Active Client...</option></select></div>
+                  <div class="form-row"><label for="upd-location-select">Select Location</label><select id="upd-location-select"><option value="">Selected Location...</option></select></div>
+                  <div class="form-row"><label for="upd-job-select">Select Ranking Job</label><select id="upd-job-select"><option value="">Select completed client job...</option></select></div>
+                </div>
+                <div class="form-grid-3">
+                  <div class="form-row"><label for="upd-date-input">Reporting Date</label><input id="upd-date-input" type="date" /></div>
+                  <div class="form-row">
+                    <label for="upd-mode-select">Execution Environment</label>
+                    <select id="upd-mode-select">
+                      <option value="dry-run" selected>Dry-Run Preview Only (Safe Default)</option>
+                      <option value="sandbox">Sandbox Spreadsheet Testing</option>
+                      <option value="production">Production Client Spreadsheet</option>
+                    </select>
+                  </div>
+                  <div class="form-row">
+                    <label for="btn-upd-enable-write">Write Permission</label>
+                    <div class="actions" style="padding-top: 4px;">
+                      <span id="upd-write-access-badge" class="pill pill-neutral">Read-only access</span>
+                      <button id="btn-upd-enable-write" class="btn-outline btn-compact" type="button">Enable Write Access</button>
+                    </div>
+                  </div>
+                </div>
+                <div id="upd-feedback" class="feedback-banner hidden" role="alert"></div>
+                <div class="button-bar">
+                  <button id="btn-upd-preview" class="btn-primary" type="button">Generate Update Preview</button>
+                  <button id="btn-upd-backup" class="btn-outline" type="button">Create Backup</button>
+                  <button id="btn-upd-execute" class="btn-navy" type="button" disabled>Confirm Update</button>
+                  <button id="btn-upd-verify" class="btn-outline" type="button" disabled>Verify Updated Sheet</button>
+                  <button id="btn-upd-history" class="btn-outline" type="button">View Update History</button>
+                  <button id="btn-upd-open-sheet" class="btn-outline" type="button" disabled>Open Original Google Sheet</button>
+                  <button id="btn-upd-view-backup" class="btn-outline" type="button" disabled>View Backup</button>
+                </div>
+                <label class="checkbox-inline" style="margin-top: 8px;">
+                  <input id="upd-confirm-chk" type="checkbox" />
+                  Confirm reviewed preview, verified row numbers, and verified backup before updating.
                 </label>
               </div>
-              <div id="cli-keywords-list" class="mini-list"></div>
-            </div>
-          </div>
-
-          <h3 class="subtable-title">Client Ranking History (Isolated)</h3>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Keyword</th>
-                  <th>Position</th>
-                  <th>Status</th>
-                  <th>URL</th>
-                  <th>Checked</th>
-                  <th>Google Loc</th>
-                </tr>
-              </thead>
-              <tbody id="cli-history-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section class="card sheets-card">
-        <div class="card-header">
-          <div>
-            <h2>Google Sheets Integration (Phase 8 — Strictly Read-Only)</h2>
-            <p class="muted">
-              Authenticate via Chrome Identity API (<code>spreadsheets.readonly</code> scope grants read access across spreadsheets available to your signed-in account). Detects groups, headers, stats blocks, formulas, and row numbers without altering the spreadsheet.
-            </p>
-          </div>
-          <span id="sheets-auth-pill" class="pill pill-neutral">Disconnected</span>
-        </div>
-
-        <div class="context-summary-grid">
-          <div class="summary-chip">
-            <span class="summary-label">OAuth Config Status</span>
-            <span id="sheets-oauth-status" class="summary-val">Checking...</span>
-          </div>
-          <div class="summary-chip">
-            <span class="summary-label">Authentication Status</span>
-            <span id="sheets-auth-status" class="summary-val">-</span>
-          </div>
-          <div class="summary-chip">
-            <span class="summary-label">Last Connected</span>
-            <span id="sheets-last-connected" class="summary-val">Never</span>
-          </div>
-          <div class="summary-chip">
-            <span class="summary-label">Active Client Sheet</span>
-            <span id="sheets-ctx-client" class="summary-val">No Active Client</span>
-          </div>
-        </div>
-
-        <div class="button-bar" style="margin-bottom: 12px;">
-          <button id="btn-sheets-connect" class="btn-navy btn-compact" type="button">Connect Google Account</button>
-          <button id="btn-sheets-disconnect" class="btn-outline btn-compact" type="button">Disconnect Google Account</button>
-          <button id="btn-sheets-test" class="btn-outline btn-compact" type="button">Test Connection</button>
-        </div>
-
-        <div id="sheets-feedback" class="feedback-banner hidden" role="alert"></div>
-
-        <div class="location-form">
-          <div class="form-grid-3">
-            <div class="form-row">
-              <label for="sheets-url-input">Google Sheet URL (supports #gid=...)</label>
-              <input id="sheets-url-input" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0" />
-            </div>
-            <div class="form-row">
-              <label for="sheets-id-input">Spreadsheet ID</label>
-              <input id="sheets-id-input" type="text" placeholder="Auto-extracted ID" />
-            </div>
-            <div class="form-row">
-              <label for="sheets-ws-select">Worksheet (verified via API)</label>
-              <select id="sheets-ws-select">
-                <option value="">Load worksheets first...</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="button-bar">
-            <button id="btn-sheets-load-ws" class="btn-outline" type="button">Load Worksheets</button>
-            <button id="btn-sheets-preview" class="btn-primary" type="button">Preview &amp; Read Sheet</button>
-            <button id="btn-sheets-refresh" class="btn-outline" type="button">Refresh &amp; Compare</button>
-            <button id="btn-sheets-confirm-import" class="btn-navy" type="button" disabled>Confirm Import Keywords Locally</button>
-          </div>
-        </div>
-
-        <div id="sheets-preview-panel" class="status-panel hidden">
-          <h3 id="sheets-preview-heading">Spreadsheet Structure Preview</h3>
-          <div class="metrics-grid">
-            <div class="summary-chip">
-              <span class="summary-label">Total Keyword Rows</span>
-              <span id="sh-m-total" class="summary-val">0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Detected Groups</span>
-              <span id="sh-m-groups" class="summary-val">-</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Header Rows</span>
-              <span id="sh-m-headers" class="summary-val">-</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Separator Rows</span>
-              <span id="sh-m-separators" class="summary-val">-</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Latest Date Col</span>
-              <span id="sh-m-latest-date" class="summary-val">-</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">History Columns</span>
-              <span id="sh-m-history-cols" class="summary-val">0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Formulas / Merges</span>
-              <span id="sh-m-meta" class="summary-val">0 / 0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Skipped / Warnings</span>
-              <span id="sh-m-warnings" class="summary-val">0</span>
-            </div>
-          </div>
-
-          <div id="sheets-sync-diff-banner" class="feedback-banner hidden"></div>
-          <label id="sheets-ambiguous-confirm-row" class="checkbox-inline hidden" style="margin: 8px 0;">
-            <input id="sheets-ambiguous-confirm-chk" type="checkbox" />
-            I confirm these detected rows represent the client keywords (structure was ambiguous).
-          </label>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Exclude</th>
-                  <th>Row #</th>
-                  <th>Keyword</th>
-                  <th>Volume</th>
-                  <th>Competition</th>
-                  <th>Landing Page</th>
-                  <th>SERP URL</th>
-                  <th>Latest Rank</th>
-                  <th>Group</th>
-                </tr>
-              </thead>
-              <tbody id="sheets-preview-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section class="card sheets-update-card">
-        <div class="card-header">
-          <div>
-            <h2>Google Sheets Update (Phase 9 — Atomic &amp; Format-Preserving)</h2>
-            <p class="muted">
-              Insert one new ranking date column cleanly after SERP while preserving all historical columns, colors, fonts, borders, merges, formulas, filters, and website stats. Defaults strictly to Dry-Run mode.
-            </p>
-          </div>
-          <span id="upd-status-pill" class="pill pill-neutral">Ready</span>
-        </div>
-
-        <div class="location-form">
-          <div class="form-grid-3">
-            <div class="form-row">
-              <label for="upd-client-select">Select Client</label>
-              <select id="upd-client-select">
-                <option value="">Active Client...</option>
-              </select>
-            </div>
-            <div class="form-row">
-              <label for="upd-location-select">Select Location</label>
-              <select id="upd-location-select">
-                <option value="">Selected Location...</option>
-              </select>
-            </div>
-            <div class="form-row">
-              <label for="upd-job-select">Select Ranking Job</label>
-              <select id="upd-job-select">
-                <option value="">Select completed client job...</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="form-grid-3">
-            <div class="form-row">
-              <label for="upd-date-input">Select Reporting Date</label>
-              <input id="upd-date-input" type="date" />
-            </div>
-            <div class="form-row">
-              <label for="upd-mode-select">Execution Environment</label>
-              <select id="upd-mode-select">
-                <option value="dry-run" selected>Dry-Run Preview Only (Default Safe)</option>
-                <option value="sandbox">Sandbox Spreadsheet Testing</option>
-                <option value="production">Production Client Spreadsheet</option>
-              </select>
-            </div>
-            <div class="form-row">
-              <label for="upd-write-access-state">Write Scope Authorization</label>
-              <div class="actions" style="padding-top: 4px;">
-                <span id="upd-write-access-badge" class="pill pill-neutral">Read-only access</span>
-                <button id="btn-upd-enable-write" class="btn-outline btn-compact" type="button">Enable Write Access</button>
+              <div id="upd-preview-panel" class="status-panel hidden">
+                <h3>Dry-Run Before &amp; After Preview</h3>
+                <div class="metrics-grid">
+                  <div class="summary-chip"><span class="summary-label">Target Sheet / Tab</span><span id="upd-m-target" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Date Column Plan</span><span id="upd-m-date-plan" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Rank / NA / Skipped</span><span id="upd-m-counts" class="summary-val">0 / 0 / 0</span></div>
+                  <div class="summary-chip"><span class="summary-label">SERP / Header Updates</span><span id="upd-m-serp-hdr" class="summary-val">0 / 0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Backup Status</span><span id="upd-m-backup" class="summary-val">Backup required</span></div>
+                  <div class="summary-chip"><span class="summary-label">Structure Status</span><span id="upd-m-structure" class="summary-val">-</span></div>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Row #</th><th>Keyword</th><th>Previous Rank</th><th>New Rank</th><th>Previous SERP URL</th><th>New SERP URL</th><th>Update Status</th></tr></thead>
+                    <tbody id="upd-preview-tbody"></tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          </div>
-
-          <div id="upd-feedback" class="feedback-banner hidden" role="alert"></div>
-
-          <div class="button-bar">
-            <button id="btn-upd-preview" class="btn-primary" type="button">Generate Update Preview</button>
-            <button id="btn-upd-backup" class="btn-outline" type="button">Create Backup</button>
-            <button id="btn-upd-execute" class="btn-navy" type="button" disabled>Confirm Update</button>
-            <button id="btn-upd-verify" class="btn-outline" type="button" disabled>Verify Updated Sheet</button>
-            <button id="btn-upd-history" class="btn-outline" type="button">View Update History</button>
-            <button id="btn-upd-open-sheet" class="btn-outline" type="button" disabled>Open Original Google Sheet</button>
-            <button id="btn-upd-view-backup" class="btn-outline" type="button" disabled>View Backup</button>
-          </div>
-
-          <label class="checkbox-inline" style="margin-top: 8px;">
-            <input id="upd-confirm-chk" type="checkbox" />
-            I have reviewed the dry-run preview, confirmed row numbers &amp; verified backup, and authorize updating this worksheet.
-          </label>
-        </div>
-
-        <div id="upd-preview-panel" class="status-panel hidden">
-          <h3>Dry-Run Before &amp; After Preview</h3>
-          <div class="metrics-grid">
-            <div class="summary-chip">
-              <span class="summary-label">Target Sheet / Tab</span>
-              <span id="upd-m-target" class="summary-val">-</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Date Column Plan</span>
-              <span id="upd-m-date-plan" class="summary-val">-</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Rank / NA / Skipped</span>
-              <span id="upd-m-counts" class="summary-val">0 / 0 / 0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">SERP / Header Updates</span>
-              <span id="upd-m-serp-hdr" class="summary-val">0 / 0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Backup Status</span>
-              <span id="upd-m-backup" class="summary-val">Backup required</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Structure Status</span>
-              <span id="upd-m-structure" class="summary-val">-</span>
-            </div>
-          </div>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Row #</th>
-                  <th>Keyword</th>
-                  <th>Previous Rank</th>
-                  <th>New Rank</th>
-                  <th>Previous SERP URL</th>
-                  <th>New SERP URL</th>
-                  <th>Update Status</th>
-                </tr>
-              </thead>
-              <tbody id="upd-preview-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div id="upd-journal-panel" class="status-panel hidden">
-          <h3>Update Operation Journal &amp; Recovery History</h3>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Operation ID</th>
-                  <th>Date</th>
-                  <th>Worksheet</th>
-                  <th>Mode</th>
-                  <th>Status</th>
-                  <th>Backup Ref</th>
-                </tr>
-              </thead>
-              <tbody id="upd-journal-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section class="card location-card">
-        <div class="card-header">
-          <div>
-            <h2>Location &amp; Google Search Verification</h2>
-            <p class="muted">
-              Shared location settings for Browser GPS (Phase 2), Google Search Location Verification (Phase 3), and Single Keyword Ranking (Phase 4).
-              Paste <code>-33.8688, 151.2093</code> into Latitude to auto-split.
-            </p>
-          </div>
-          <span id="loc-state-pill" class="pill pill-neutral">Not configured</span>
-        </div>
-
-        <form id="location-form" class="location-form" novalidate>
-          <div class="form-grid-2">
-            <div class="form-row">
-              <label for="loc-name">Location name</label>
-              <input id="loc-name" type="text" placeholder="e.g. Sydney CBD" autocomplete="off" />
-            </div>
-
-            <div class="form-row">
-              <label for="loc-city">Target city</label>
-              <input id="loc-city" type="text" placeholder="e.g. Sydney" autocomplete="off" />
-            </div>
-          </div>
-
-          <div class="form-grid-2">
-            <div class="form-row">
-              <label for="loc-lat">Latitude</label>
-              <input
-                id="loc-lat"
-                type="text"
-                inputmode="decimal"
-                placeholder="-33.8688 (or paste -33.8688, 151.2093)"
-                autocomplete="off"
-              />
-            </div>
-
-            <div class="form-row">
-              <label for="loc-lng">Longitude</label>
-              <input
-                id="loc-lng"
-                type="text"
-                inputmode="decimal"
-                placeholder="151.2093"
-                autocomplete="off"
-              />
-            </div>
-          </div>
-
-          <div class="form-grid-4">
-            <div class="form-row">
-              <label for="loc-accuracy">Accuracy (metres)</label>
-              <input id="loc-accuracy" type="number" min="1" step="any" value="20" />
-            </div>
-
-            <div class="form-row">
-              <label for="loc-country">Target country</label>
-              <select id="loc-country">
-                <option value="Australia">Australia</option>
-                <option value="United States">United States</option>
-                <option value="United Kingdom">United Kingdom</option>
-                <option value="Canada">Canada</option>
-                <option value="India">India</option>
-                <option value="New Zealand">New Zealand</option>
-              </select>
-            </div>
-
-            <div class="form-row">
-              <label for="loc-language">Target language</label>
-              <select id="loc-language">
-                <option value="en-AU">en-AU (English - Australia)</option>
-                <option value="en-US">en-US (English - US)</option>
-                <option value="en-GB">en-GB (English - UK)</option>
-                <option value="en-CA">en-CA (English - Canada)</option>
-                <option value="en-IN">en-IN (English - India)</option>
-                <option value="en-NZ">en-NZ (English - New Zealand)</option>
-              </select>
-            </div>
-
-            <div class="form-row">
-              <label for="loc-google-domain">Google search domain</label>
-              <select id="loc-google-domain">
-                <option value="google.com.au">google.com.au</option>
-                <option value="google.com">google.com</option>
-                <option value="google.co.uk">google.co.uk</option>
-                <option value="google.ca">google.ca</option>
-                <option value="google.co.in">google.co.in</option>
-                <option value="google.co.nz">google.co.nz</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="form-row full-width">
-            <label for="loc-test-url">Controlled Test Page URL (for Browser GPS only)</label>
-            <input
-              id="loc-test-url"
-              type="url"
-              value="https://example.com/"
-              placeholder="https://example.com/"
-            />
-          </div>
-
-          <div id="loc-feedback" class="feedback-banner hidden" role="alert"></div>
-
-          <div class="action-group">
-            <span class="action-group-label">Browser GPS Controls (Phase 2)</span>
-            <div class="button-bar">
-              <button id="btn-apply-location" class="btn-outline" type="submit">Apply Location</button>
-              <button id="btn-test-location" class="btn-outline" type="button">Test Location</button>
-              <button id="btn-open-test-tab" class="btn-outline" type="button">Open Test Tab</button>
-              <button id="btn-reset-location" class="btn-outline btn-reset" type="button">Reset Location</button>
-            </div>
-          </div>
-
-          <div class="action-group google-group">
-            <div class="action-group-header">
-              <span class="action-group-label">Google Search Location (Phase 3)</span>
-              <label class="checkbox-inline">
-                <input id="chk-update-location" type="checkbox" />
-                Click Google's &ldquo;Update location&rdquo; control if shown
-              </label>
-            </div>
-            <div class="button-bar">
-              <button id="btn-apply-google-location" class="btn-navy" type="button">Apply Google Location</button>
-              <button id="btn-verify-google-location" class="btn-outline" type="button">Verify Google Location</button>
-              <button id="btn-open-google-search" class="btn-outline" type="button">Open Google Search</button>
-            </div>
-          </div>
-        </form>
-
-        <div class="status-panel">
-          <h3>Verification Dashboard</h3>
-          <div class="kv-list">
-            <div class="kv-row">
-              <span class="kv-label">Target location</span>
-              <span id="status-target-location" class="kv-value">Not configured</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Configured latitude and longitude</span>
-              <span id="status-configured-coords" class="kv-value">Not configured</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Actual browser latitude and longitude</span>
-              <span id="status-reported-coords" class="kv-value">Not tested</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Browser GPS verification</span>
-              <span id="status-browser-gps" class="kv-value">Not configured</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Google-detected location</span>
-              <span id="status-google-detected" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Google location source</span>
-              <span id="status-google-source" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Google location verification status</span>
-              <span id="status-google-location" class="kv-value">Unverified</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Active search tab</span>
-              <span id="status-tab-id" class="kv-value">None</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Last verification time</span>
-              <span id="status-last-verified" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Error or warning messages</span>
-              <span id="status-errors-warnings" class="kv-value">None</span>
-            </div>
-          </div>
-          <p class="limitation-note">
-            Note: Browser GPS verification (<code>navigator.geolocation</code>), country/language presets, and a city-level footer match on Google Search are reported independently. None of them guarantee exact GPS-based ranking accuracy when Google uses IP address or account signals.
-          </p>
-        </div>
-      </section>
-
-      <section class="card ranking-card">
-        <div class="card-header">
-          <div>
-            <h2>Single Keyword Ranking (Phase 4)</h2>
-            <p class="muted">
-              Check one keyword using the verified Google Search location above, or parse manually supplied SERP HTML.
-            </p>
-          </div>
-          <span id="rank-status-pill" class="pill pill-neutral">Ready</span>
-        </div>
-
-        <div class="context-summary-grid">
-          <div class="summary-chip">
-            <span class="summary-label">Configured Location</span>
-            <span id="rank-ctx-location" class="summary-val">Not configured</span>
-          </div>
-          <div class="summary-chip">
-            <span class="summary-label">Lat / Lng</span>
-            <span id="rank-ctx-coords" class="summary-val">-</span>
-          </div>
-          <div class="summary-chip">
-            <span class="summary-label">Google-Detected Location</span>
-            <span id="rank-ctx-google" class="summary-val">Unverified</span>
-          </div>
-          <div class="summary-chip">
-            <span class="summary-label">Country / Language</span>
-            <span id="rank-ctx-locale" class="summary-val">-</span>
-          </div>
-        </div>
-
-        <form id="ranking-form" class="location-form" novalidate>
-          <div class="form-grid-3">
-            <div class="form-row">
-              <label for="rank-domain">Client website domain</label>
-              <input id="rank-domain" type="text" placeholder="e.g. example.com" autocomplete="off" />
-            </div>
-
-            <div class="form-row">
-              <label for="rank-keyword">Target keyword</label>
-              <input id="rank-keyword" type="text" placeholder="e.g. seo agency sydney" autocomplete="off" />
-            </div>
-
-            <div class="form-row">
-              <label for="rank-depth">Search depth</label>
-              <select id="rank-depth">
-                <option value="10">10</option>
-                <option value="20">20</option>
-                <option value="30">30</option>
-                <option value="50" selected>50</option>
-                <option value="100">100</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="manual-html-box">
-            <label class="checkbox-inline">
-              <input id="rank-use-manual-html" type="checkbox" />
-              Use Manual SERP HTML testing mode (parse supplied SERP HTML instead of live Google Search)
-            </label>
-            <div id="rank-manual-panel" class="manual-panel hidden">
-              <div class="form-row">
-                <label for="rank-manual-file">Upload SERP HTML file (optional)</label>
-                <input id="rank-manual-file" type="file" accept=".html,.htm" />
+              <div id="upd-journal-panel" class="status-panel hidden">
+                <h3>Update Operation Journal &amp; Recovery History</h3>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Operation ID</th><th>Date</th><th>Worksheet</th><th>Mode</th><th>Status</th><th>Backup Ref</th></tr></thead>
+                    <tbody id="upd-journal-tbody"></tbody>
+                  </table>
+                </div>
               </div>
-              <div class="form-row">
-                <label for="rank-manual-html">Paste SERP HTML</label>
-                <textarea
-                  id="rank-manual-html"
-                  rows="5"
-                  placeholder="Paste full Google SERP HTML here..."
-                ></textarea>
+            </section>
+          </div>
+
+          <!-- PAGE: JOBS & CHECKS (UNIFIED 12-STEP WORKFLOW + LOCATION + BULK + JOB HISTORY) -->
+          <div class="page-view hidden" data-page="jobs">
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2>Unified Ranking Workflow</h2>
+                  <p class="muted">Follow Steps 1–12 in order: Select Client &rarr; Location &rarr; Verify GPS/Google &rarr; Bulk Job &rarr; Google Sheet Preview/Backup/Update.</p>
+                </div>
               </div>
-            </div>
-          </div>
-
-          <div id="rank-feedback" class="feedback-banner hidden" role="alert"></div>
-
-          <div class="button-bar">
-            <button id="btn-check-ranking" class="btn-navy" type="submit">Check Ranking</button>
-            <button id="btn-stop-ranking" class="btn-outline" type="button" disabled>Stop</button>
-            <button id="btn-clear-ranking" class="btn-outline btn-reset" type="button">Clear Results</button>
-          </div>
-        </form>
-
-        <div id="rank-result-panel" class="status-panel hidden">
-          <div class="action-group-header">
-            <h3>Ranking Result Details</h3>
-            <span id="res-source-badge" class="pill pill-neutral">-</span>
-          </div>
-          <div class="kv-list">
-            <div class="kv-row">
-              <span class="kv-label">Data source</span>
-              <span id="res-source-label" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Result status</span>
-              <span id="res-status" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Keyword</span>
-              <span id="res-keyword" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Target website</span>
-              <span id="res-website" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Organic ranking position</span>
-              <span id="res-position" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Actual ranking URL</span>
-              <span id="res-url" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Organic results checked / Requested depth</span>
-              <span id="res-depth-count" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Browser GPS status</span>
-              <span id="res-gps-status" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Google location status</span>
-              <span id="res-google-status" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Google location source</span>
-              <span id="res-google-source" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Check date and time</span>
-              <span id="res-checked-at" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Processing duration</span>
-              <span id="res-duration" class="kv-value">-</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Error details</span>
-              <span id="res-error" class="kv-value">None</span>
-            </div>
-          </div>
-
-          <h3 class="subtable-title">Extracted Organic Results</h3>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Position</th>
-                  <th>Page Title</th>
-                  <th>URL</th>
-                </tr>
-              </thead>
-              <tbody id="rank-results-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section class="card accuracy-card">
-        <div class="card-header">
-          <div>
-            <h2>Ranking Accuracy Lab (Phase 5)</h2>
-            <p class="muted">
-              Compare extension ranking results against manually verified GS Location Changer baselines.
-              Reuses configured website domain, target location, lat/lng, country, language, and search depth.
-            </p>
-          </div>
-          <span id="acc-status-pill" class="pill pill-neutral">Pending Validation</span>
-        </div>
-
-        <div class="context-summary-grid">
-          <div class="summary-chip">
-            <span class="summary-label">Website Domain</span>
-            <span id="acc-ctx-domain" class="summary-val">-</span>
-          </div>
-          <div class="summary-chip">
-            <span class="summary-label">Target Location &amp; Coords</span>
-            <span id="acc-ctx-location" class="summary-val">Not configured</span>
-          </div>
-          <div class="summary-chip">
-            <span class="summary-label">Country / Language</span>
-            <span id="acc-ctx-locale" class="summary-val">-</span>
-          </div>
-          <div class="summary-chip">
-            <span class="summary-label">Search Depth</span>
-            <span id="acc-ctx-depth" class="summary-val">50</span>
-          </div>
-        </div>
-
-        <div class="location-form">
-          <div class="form-grid-3">
-            <div class="form-row">
-              <label for="acc-device">Device type</label>
-              <select id="acc-device">
-                <option value="Desktop" selected>Desktop</option>
-                <option value="Mobile">Mobile</option>
-              </select>
-            </div>
-
-            <div class="form-row">
-              <label for="acc-tolerance">Ranking tolerance (&plusmn; positions)</label>
-              <select id="acc-tolerance">
-                <option value="0">0 (Exact only)</option>
-                <option value="1" selected>1 (Default)</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-                <option value="4">4</option>
-                <option value="5">5</option>
-              </select>
-            </div>
-
-            <div class="form-row">
-              <label for="acc-csv-file">Import manual baseline CSV</label>
-              <input id="acc-csv-file" type="file" accept=".csv" />
-            </div>
-          </div>
-
-          <div class="form-row">
-            <label for="acc-keywords">Keyword list (one keyword per line; supports duplicate keywords)</label>
-            <textarea
-              id="acc-keywords"
-              rows="4"
-              placeholder="seo agency sydney&#10;local seo sydney"
-            ></textarea>
-          </div>
-
-          <div id="acc-feedback" class="feedback-banner hidden" role="alert"></div>
-
-          <div class="button-bar">
-            <button id="btn-acc-sync-keywords" class="btn-outline" type="button">Sync Keywords to Baseline Table</button>
-            <button id="btn-acc-compare" class="btn-navy" type="button">Run Accuracy Comparison</button>
-            <button id="btn-acc-export-csv" class="btn-outline" type="button">Export Report (CSV)</button>
-            <button id="btn-acc-export-json" class="btn-outline" type="button">Export JSON</button>
-            <button id="btn-acc-clear" class="btn-outline btn-reset" type="button">Clear Comparison Data</button>
-          </div>
-        </div>
-
-        <div class="status-panel">
-          <h3>Editable GS Location Changer Baseline</h3>
-          <p class="muted">
-            Columns: Keyword, Manual Ranking (number or NA), Manual Ranking URL, Target Location, Latitude, Longitude, Device, Checked At.
-          </p>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Keyword</th>
-                  <th>Manual Ranking</th>
-                  <th>Manual Ranking URL</th>
-                  <th>Device</th>
-                  <th>Checked At</th>
-                </tr>
-              </thead>
-              <tbody id="acc-baseline-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div id="acc-report-panel" class="status-panel hidden">
-          <h3>Accuracy Metrics &amp; Comparison Results</h3>
-          <div class="metrics-grid">
-            <div class="summary-chip">
-              <span class="summary-label">Total Tested</span>
-              <span id="met-total" class="summary-val">0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Comparable Keywords</span>
-              <span id="met-comparable" class="summary-val">0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Exact Match %</span>
-              <span id="met-exact-pct" class="summary-val">0%</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Within Tolerance %</span>
-              <span id="met-tol-pct" class="summary-val">0%</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">URL Match %</span>
-              <span id="met-url-pct" class="summary-val">0%</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Avg Abs Diff</span>
-              <span id="met-avg-diff" class="summary-val">-</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Location Mismatches</span>
-              <span id="met-loc-mismatch" class="summary-val">0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Blocked Searches</span>
-              <span id="met-blocked" class="summary-val">0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Incomplete Searches</span>
-              <span id="met-incomplete" class="summary-val">0</span>
-            </div>
-          </div>
-
-          <p class="limitation-note">
-            Proposed benchmark targets for manual validation (at least 20 representative keywords): &ge;90% within 1 ranking position, &ge;90% URL agreement, 0 unreported location mismatches, 0 blocked searches recorded as NA. Proposed targets only — not achieved results.
-          </p>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Keyword</th>
-                  <th>Manual</th>
-                  <th>Extension</th>
-                  <th>Diff</th>
-                  <th>Manual URL</th>
-                  <th>Extension URL</th>
-                  <th>URL Match</th>
-                  <th>GPS</th>
-                  <th>Google Loc</th>
-                  <th>Source</th>
-                  <th>Comparison Status</th>
-                </tr>
-              </thead>
-              <tbody id="acc-comparison-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section class="card bulk-card">
-        <div class="card-header">
-          <div>
-            <h2>Bulk Keyword Checker (Phase 6)</h2>
-            <p class="muted">
-              Process multiple keywords sequentially using the verified location session and Single Keyword Checker.
-              Duplicates and row order are preserved; blocked searches stop immediately without fabricating NA.
-            </p>
-          </div>
-          <span id="bulk-job-pill" class="pill pill-neutral">Ready</span>
-        </div>
-
-        <div class="context-summary-grid">
-          <div class="summary-chip">
-            <span class="summary-label">Client Domain</span>
-            <span id="bulk-ctx-domain" class="summary-val">-</span>
-          </div>
-          <div class="summary-chip">
-            <span class="summary-label">Location &amp; Coordinates</span>
-            <span id="bulk-ctx-location" class="summary-val">Not configured</span>
-          </div>
-          <div class="summary-chip">
-            <span class="summary-label">Country / Language</span>
-            <span id="bulk-ctx-locale" class="summary-val">-</span>
-          </div>
-          <div class="summary-chip">
-            <span class="summary-label">Device / Depth</span>
-            <span id="bulk-ctx-mode" class="summary-val">Desktop · Depth 50</span>
-          </div>
-        </div>
-
-        <div class="location-form">
-          <div class="form-grid-3">
-            <div class="form-row">
-              <label for="bulk-device">Device type (supported modes)</label>
-              <select id="bulk-device">
-                <option value="Desktop" selected>Desktop (Verified &amp; Supported)</option>
-              </select>
-            </div>
-
-            <div class="form-row">
-              <label for="bulk-csv-file">Upload CSV keyword list</label>
-              <input id="bulk-csv-file" type="file" accept=".csv" />
-            </div>
-
-            <div class="form-row">
-              <label for="bulk-txt-file">Upload TXT keyword list</label>
-              <input id="bulk-txt-file" type="file" accept=".txt" />
-            </div>
-          </div>
-
-          <div class="form-row">
-            <div class="action-group-header">
-              <label for="bulk-keywords">Keywords (one per line; duplicate rows preserved)</label>
-              <div class="actions">
-                <button id="btn-bulk-import-sheets" class="btn-link" type="button">
-                  Load from Google Sheets
-                </button>
-                <button id="btn-bulk-import-lab" class="btn-link" type="button">
-                  Import from Accuracy Lab
-                </button>
+              <div class="workflow-strip">
+                <div class="workflow-step-chip"><strong>1–3.</strong> Client, Location &amp; Keywords</div>
+                <div class="workflow-step-chip"><strong>4–5.</strong> Verify GPS &amp; Google Location</div>
+                <div class="workflow-step-chip"><strong>6–8.</strong> Start Bulk Job &amp; Review</div>
+                <div class="workflow-step-chip"><strong>9–12.</strong> Preview, Backup &amp; Sheet Update</div>
               </div>
-            </div>
-            <textarea
-              id="bulk-keywords"
-              rows="5"
-              placeholder="seo agency sydney&#10;local seo sydney&#10;digital marketing agency"
-            ></textarea>
+            </section>
+
+            <section class="card location-card">
+              <div class="card-header">
+                <div>
+                  <h2>Location &amp; Google Search Verification</h2>
+                  <p class="muted">Configure &amp; verify GPS + Google location on dedicated Chrome tab.</p>
+                </div>
+                <span id="loc-state-pill" class="pill pill-neutral">Not configured</span>
+              </div>
+              <form id="location-form" class="location-form" novalidate>
+                <div class="form-grid-2">
+                  <div class="form-row"><label for="loc-name">Location name</label><input id="loc-name" type="text" placeholder="e.g. Sydney CBD" /></div>
+                  <div class="form-row"><label for="loc-city">Target city</label><input id="loc-city" type="text" placeholder="e.g. Sydney" /></div>
+                </div>
+                <div class="form-grid-2">
+                  <div class="form-row"><label for="loc-lat">Latitude</label><input id="loc-lat" type="text" inputmode="decimal" placeholder="-33.8688 (or paste pair)" /></div>
+                  <div class="form-row"><label for="loc-lng">Longitude</label><input id="loc-lng" type="text" inputmode="decimal" placeholder="151.2093" /></div>
+                </div>
+                <div class="form-grid-4">
+                  <div class="form-row"><label for="loc-accuracy">Accuracy (m)</label><input id="loc-accuracy" type="number" min="1" step="any" value="20" /></div>
+                  <div class="form-row">
+                    <label for="loc-country">Country</label>
+                    <select id="loc-country">
+                      <option value="Australia">Australia</option><option value="United States">United States</option><option value="United Kingdom">United Kingdom</option><option value="Canada">Canada</option><option value="India">India</option><option value="New Zealand">New Zealand</option>
+                    </select>
+                  </div>
+                  <div class="form-row">
+                    <label for="loc-language">Language</label>
+                    <select id="loc-language">
+                      <option value="en-AU">en-AU</option><option value="en-US">en-US</option><option value="en-GB">en-GB</option><option value="en-CA">en-CA</option><option value="en-IN">en-IN</option><option value="en-NZ">en-NZ</option>
+                    </select>
+                  </div>
+                  <div class="form-row">
+                    <label for="loc-google-domain">Google Domain</label>
+                    <select id="loc-google-domain">
+                      <option value="google.com.au">google.com.au</option><option value="google.com">google.com</option><option value="google.co.uk">google.co.uk</option><option value="google.ca">google.ca</option><option value="google.co.in">google.co.in</option><option value="google.co.nz">google.co.nz</option>
+                    </select>
+                  </div>
+                </div>
+                <div id="loc-feedback" class="feedback-banner hidden" role="alert"></div>
+                <div class="button-bar" style="margin-bottom: 10px;">
+                  <button id="btn-apply-location" class="btn-outline" type="submit">Apply Location</button>
+                  <button id="btn-test-location" class="btn-outline" type="button">Test Location</button>
+                  <button id="btn-open-test-tab" class="btn-outline" type="button">Open Test Tab</button>
+                  <button id="btn-reset-location" class="btn-outline btn-reset" type="button">Reset Location</button>
+                </div>
+                <div class="action-group google-group">
+                  <div class="action-group-header">
+                    <span class="action-group-label">Google Search Location Verification</span>
+                    <label class="checkbox-inline"><input id="chk-update-location" type="checkbox" /> Click &ldquo;Update location&rdquo; if shown</label>
+                  </div>
+                  <div class="button-bar">
+                    <button id="btn-apply-google-location" class="btn-navy" type="button">Apply Google Location</button>
+                    <button id="btn-verify-google-location" class="btn-outline" type="button">Verify Google Location</button>
+                    <button id="btn-open-google-search" class="btn-outline" type="button">Open Google Search</button>
+                  </div>
+                </div>
+              </form>
+              <div class="status-panel">
+                <h3>Verification Status</h3>
+                <div class="kv-list">
+                  <div class="kv-row"><span class="kv-label">Target location</span><span id="status-target-location" class="kv-value">Not configured</span></div>
+                  <div class="kv-row"><span class="kv-label">Configured coords</span><span id="status-configured-coords" class="kv-value">Not configured</span></div>
+                  <div class="kv-row"><span class="kv-label">Reported browser GPS</span><span id="status-reported-coords" class="kv-value">Not tested</span></div>
+                  <div class="kv-row"><span class="kv-label">Browser GPS verification</span><span id="status-browser-gps" class="kv-value">Not configured</span></div>
+                  <div class="kv-row"><span class="kv-label">Google-detected location</span><span id="status-google-detected" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Google location source</span><span id="status-google-source" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Google verification status</span><span id="status-google-location" class="kv-value">Unverified</span></div>
+                  <div class="kv-row"><span class="kv-label">Active search tab</span><span id="status-tab-id" class="kv-value">None</span></div>
+                  <div class="kv-row"><span class="kv-label">Last verification time</span><span id="status-last-verified" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Errors / warnings</span><span id="status-errors-warnings" class="kv-value">None</span></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="card bulk-card">
+              <div class="card-header">
+                <div>
+                  <h2>Bulk Keyword Checker</h2>
+                  <p class="muted">Sequential live checking with pause/resume, stop, retry failed, and row-anchored persistence.</p>
+                </div>
+                <span id="bulk-job-pill" class="pill pill-neutral">Ready</span>
+              </div>
+              <div class="context-summary-grid">
+                <div class="summary-chip"><span class="summary-label">Client Domain</span><span id="bulk-ctx-domain" class="summary-val">-</span></div>
+                <div class="summary-chip"><span class="summary-label">Location</span><span id="bulk-ctx-location" class="summary-val">Not configured</span></div>
+                <div class="summary-chip"><span class="summary-label">Locale</span><span id="bulk-ctx-locale" class="summary-val">-</span></div>
+                <div class="summary-chip"><span class="summary-label">Device / Depth</span><span id="bulk-ctx-mode" class="summary-val">Desktop · Depth 50</span></div>
+              </div>
+              <div class="location-form">
+                <div class="form-grid-3">
+                  <div class="form-row"><label for="bulk-device">Device type</label><select id="bulk-device"><option value="Desktop" selected>Desktop</option></select></div>
+                  <div class="form-row"><label for="bulk-csv-file">Upload CSV</label><input id="bulk-csv-file" type="file" accept=".csv" /></div>
+                  <div class="form-row"><label for="bulk-txt-file">Upload TXT</label><input id="bulk-txt-file" type="file" accept=".txt" /></div>
+                </div>
+                <div class="form-row">
+                  <div class="action-group-header">
+                    <label for="bulk-keywords">Keywords</label>
+                    <div class="actions">
+                      <button id="btn-bulk-import-sheets" class="btn-link" type="button">Load from Google Sheets</button>
+                      <button id="btn-bulk-import-lab" class="btn-link" type="button">Import from Accuracy Lab</button>
+                    </div>
+                  </div>
+                  <textarea id="bulk-keywords" rows="4" placeholder="Enter keywords (one per line)..."></textarea>
+                </div>
+                <div id="bulk-feedback" class="feedback-banner hidden" role="alert"></div>
+                <div class="button-bar">
+                  <button id="btn-bulk-start" class="btn-navy" type="button">Start Ranking Check</button>
+                  <button id="btn-bulk-pause" class="btn-outline" type="button" disabled>Pause</button>
+                  <button id="btn-bulk-resume" class="btn-outline" type="button" disabled>Resume</button>
+                  <button id="btn-bulk-stop" class="btn-outline" type="button" disabled>Stop</button>
+                  <button id="btn-bulk-retry" class="btn-outline" type="button" disabled>Retry Failed Keywords</button>
+                  <button id="btn-bulk-export" class="btn-outline" type="button" disabled>Export Results</button>
+                  <button id="btn-bulk-clear" class="btn-outline btn-reset" type="button">Clear Results</button>
+                </div>
+              </div>
+              <div id="bulk-progress-panel" class="status-panel">
+                <div class="metrics-grid">
+                  <div class="summary-chip"><span class="summary-label">Total</span><span id="bulk-m-total" class="summary-val">0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Completed</span><span id="bulk-m-completed" class="summary-val">0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Pending</span><span id="bulk-m-pending" class="summary-val">0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Ranked</span><span id="bulk-m-ranked" class="summary-val">0</span></div>
+                  <div class="summary-chip"><span class="summary-label">NA</span><span id="bulk-m-na" class="summary-val">0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Failed</span><span id="bulk-m-failed" class="summary-val">0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Current Keyword</span><span id="bulk-m-current" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Elapsed / ETA</span><span id="bulk-m-time" class="summary-val">0s / -</span></div>
+                </div>
+                <div class="progress-wrap">
+                  <div class="progress-header"><span id="bulk-progress-label" class="muted">Idle</span><span id="bulk-progress-pct" class="summary-val">0%</span></div>
+                  <div class="progress-track"><div id="bulk-progress-fill" class="progress-fill" style="width: 0%"></div></div>
+                </div>
+                <div class="filter-bar">
+                  <input id="bulk-search-input" type="text" placeholder="Filter live queue..." />
+                  <select id="bulk-filter-select">
+                    <option value="all">All</option><option value="top3">Top 3</option><option value="top10">Top 10</option><option value="top20">Top 20</option><option value="ranked">Ranked</option><option value="not_found">Not found</option><option value="failed">Failed</option><option value="pending">Pending</option>
+                  </select>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>#</th><th>Keyword</th><th>Position</th><th>URL</th><th>Checked</th><th>Google Loc</th><th>Loc Status</th><th>Status</th><th>Time</th><th>Error</th></tr></thead>
+                    <tbody id="bulk-results-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="card-header">
+                <h2>Agency Job History</h2>
+                <button id="btn-jobs-refresh" class="btn-outline btn-compact" type="button">Refresh Jobs</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Job ID</th><th>Client</th><th>Location</th><th>Total</th><th>Status</th><th>Started</th><th>Completed</th><th>Duration</th><th>Interruption / Error</th><th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="jobs-history-tbody"></tbody>
+                </table>
+              </div>
+            </section>
           </div>
 
-          <div id="bulk-feedback" class="feedback-banner hidden" role="alert"></div>
-
-          <div class="button-bar">
-            <button id="btn-bulk-start" class="btn-navy" type="button">Start Ranking Check</button>
-            <button id="btn-bulk-pause" class="btn-outline" type="button" disabled>Pause</button>
-            <button id="btn-bulk-resume" class="btn-outline" type="button" disabled>Resume</button>
-            <button id="btn-bulk-stop" class="btn-outline" type="button" disabled>Stop</button>
-            <button id="btn-bulk-retry" class="btn-outline" type="button" disabled>Retry Failed Keywords</button>
-            <button id="btn-bulk-export" class="btn-outline" type="button" disabled>Export Results</button>
-            <button id="btn-bulk-clear" class="btn-outline btn-reset" type="button">Clear Results</button>
-          </div>
-        </div>
-
-        <div id="bulk-progress-panel" class="status-panel">
-          <h3>Job Progress</h3>
-          <div class="metrics-grid">
-            <div class="summary-chip">
-              <span class="summary-label">Total Keywords</span>
-              <span id="bulk-m-total" class="summary-val">0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Completed</span>
-              <span id="bulk-m-completed" class="summary-val">0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Pending</span>
-              <span id="bulk-m-pending" class="summary-val">0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Ranked</span>
-              <span id="bulk-m-ranked" class="summary-val">0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Not Found (NA)</span>
-              <span id="bulk-m-na" class="summary-val">0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Failed / Blocked</span>
-              <span id="bulk-m-failed" class="summary-val">0</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Current Keyword</span>
-              <span id="bulk-m-current" class="summary-val">-</span>
-            </div>
-            <div class="summary-chip">
-              <span class="summary-label">Elapsed / ETA</span>
-              <span id="bulk-m-time" class="summary-val">0s / -</span>
-            </div>
-          </div>
-
-          <div class="progress-wrap">
-            <div class="progress-header">
-              <span id="bulk-progress-label" class="muted">Idle</span>
-              <span id="bulk-progress-pct" class="summary-val">0%</span>
-            </div>
-            <div class="progress-track">
-              <div id="bulk-progress-fill" class="progress-fill" style="width: 0%"></div>
-            </div>
+          <!-- PAGE: ACCURACY LAB -->
+          <div class="page-view hidden" data-page="accuracy-lab">
+            <section class="card accuracy-card">
+              <div class="card-header">
+                <div>
+                  <h2>Ranking Accuracy Lab</h2>
+                  <p class="muted">Compare extension rankings against manually verified GS Location Changer CSV baselines.</p>
+                </div>
+                <span id="acc-status-pill" class="pill pill-neutral">Pending Validation</span>
+              </div>
+              <div class="context-summary-grid">
+                <div class="summary-chip"><span class="summary-label">Website Domain</span><span id="acc-ctx-domain" class="summary-val">-</span></div>
+                <div class="summary-chip"><span class="summary-label">Location</span><span id="acc-ctx-location" class="summary-val">Not configured</span></div>
+                <div class="summary-chip"><span class="summary-label">Locale</span><span id="acc-ctx-locale" class="summary-val">-</span></div>
+                <div class="summary-chip"><span class="summary-label">Depth</span><span id="acc-ctx-depth" class="summary-val">50</span></div>
+              </div>
+              <div class="location-form">
+                <div class="form-grid-3">
+                  <div class="form-row"><label for="acc-device">Device</label><select id="acc-device"><option value="Desktop" selected>Desktop</option><option value="Mobile">Mobile</option></select></div>
+                  <div class="form-row"><label for="acc-tolerance">Tolerance</label><select id="acc-tolerance"><option value="0">0</option><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
+                  <div class="form-row"><label for="acc-csv-file">Baseline CSV</label><input id="acc-csv-file" type="file" accept=".csv" /></div>
+                </div>
+                <div class="form-row"><label for="acc-keywords">Keywords</label><textarea id="acc-keywords" rows="3"></textarea></div>
+                <div id="acc-feedback" class="feedback-banner hidden" role="alert"></div>
+                <div class="button-bar">
+                  <button id="btn-acc-sync-keywords" class="btn-outline" type="button">Sync Keywords to Table</button>
+                  <button id="btn-acc-compare" class="btn-navy" type="button">Compare Against Extension Results</button>
+                  <button id="btn-acc-export-csv" class="btn-outline" type="button">Export CSV Report</button>
+                  <button id="btn-acc-export-json" class="btn-outline" type="button">Export JSON Report</button>
+                  <button id="btn-acc-clear" class="btn-outline btn-reset" type="button">Clear Baseline</button>
+                </div>
+              </div>
+              <h3 class="subtable-title">Manual GS Location Changer Baseline</h3>
+              <div class="table-wrap"><table><thead><tr><th>Keyword</th><th>Manual Rank</th><th>Manual URL</th><th>Device</th><th>Date</th></tr></thead><tbody id="acc-baseline-tbody"></tbody></table></div>
+              <div id="acc-report-panel" class="status-panel hidden">
+                <div class="metrics-grid">
+                  <div class="summary-chip"><span class="summary-label">Total</span><span id="met-total" class="summary-val">0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Comparable</span><span id="met-comparable" class="summary-val">0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Exact Match</span><span id="met-exact-pct" class="summary-val">0%</span></div>
+                  <div class="summary-chip"><span class="summary-label">Within Tolerance</span><span id="met-tol-pct" class="summary-val">0%</span></div>
+                  <div class="summary-chip"><span class="summary-label">URL Match</span><span id="met-url-pct" class="summary-val">0%</span></div>
+                  <div class="summary-chip"><span class="summary-label">Avg Diff</span><span id="met-avg-diff" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Loc Mismatch</span><span id="met-loc-mismatch" class="summary-val">0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Blocked</span><span id="met-blocked" class="summary-val">0</span></div>
+                  <div class="summary-chip"><span class="summary-label">Incomplete</span><span id="met-incomplete" class="summary-val">0</span></div>
+                </div>
+                <div class="table-wrap"><table><thead><tr><th>Keyword</th><th>Manual</th><th>Ext</th><th>Diff</th><th>Manual URL</th><th>Ext URL</th><th>URL Match</th><th>GPS</th><th>Google Loc</th><th>Source</th><th>Status</th></tr></thead><tbody id="acc-comparison-tbody"></tbody></table></div>
+              </div>
+            </section>
           </div>
 
-          <div class="filter-bar">
-            <input
-              id="bulk-search-input"
-              type="text"
-              placeholder="Search keyword, URL, or error..."
-              autocomplete="off"
-            />
-            <select id="bulk-filter-select">
-              <option value="all">All results</option>
-              <option value="top3">Top 3</option>
-              <option value="top10">Top 10</option>
-              <option value="top20">Top 20</option>
-              <option value="ranked">Ranked</option>
-              <option value="not_found">Not found</option>
-              <option value="failed">Failed</option>
-              <option value="pending">Pending</option>
-            </select>
+          <!-- PAGE: REPORTS -->
+          <div class="page-view hidden" data-page="reports">
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2>CSV Reports</h2>
+                  <p class="muted">All exported CSV reports sanitize formula-injection characters and include real client/verification context.</p>
+                </div>
+              </div>
+              <div class="filter-bar">
+                <select id="rep-client-filter"><option value="">All Clients</option></select>
+              </div>
+              <div id="rep-feedback" class="feedback-banner hidden" role="alert"></div>
+              <div class="reports-grid">
+                <div class="report-tile"><strong>Current Keyword Rankings</strong><button type="button" class="btn-navy btn-compact" data-report-type="current_rankings">Download CSV</button></div>
+                <div class="report-tile"><strong>Historical Ranking Log</strong><button type="button" class="btn-outline btn-compact" data-report-type="historical_comparison">Download CSV</button></div>
+                <div class="report-tile"><strong>Ranking Improvements</strong><button type="button" class="btn-outline btn-compact" data-report-type="improvements">Download CSV</button></div>
+                <div class="report-tile"><strong>Ranking Declines</strong><button type="button" class="btn-outline btn-compact" data-report-type="declines">Download CSV</button></div>
+                <div class="report-tile"><strong>New Rankings</strong><button type="button" class="btn-outline btn-compact" data-report-type="new_rankings">Download CSV</button></div>
+                <div class="report-tile"><strong>Lost Rankings</strong><button type="button" class="btn-outline btn-compact" data-report-type="lost_rankings">Download CSV</button></div>
+                <div class="report-tile"><strong>Failed Ranking Checks</strong><button type="button" class="btn-outline btn-compact" data-report-type="failed_checks">Download CSV</button></div>
+                <div class="report-tile"><strong>Client Summaries</strong><button type="button" class="btn-outline btn-compact" data-report-type="client_summary">Download CSV</button></div>
+                <div class="report-tile"><strong>Google Sheet Update History</strong><button type="button" class="btn-outline btn-compact" data-report-type="sheet_update_history">Download CSV</button></div>
+                <div class="report-tile"><strong>Ranking Accuracy Comparison</strong><button type="button" class="btn-outline btn-compact" data-report-type="accuracy_comparison">Download CSV</button></div>
+              </div>
+            </section>
           </div>
 
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Keyword</th>
-                  <th>Position</th>
-                  <th>Ranking URL</th>
-                  <th>Results Checked</th>
-                  <th>Google-Detected Location</th>
-                  <th>Location Status</th>
-                  <th>Result Status</th>
-                  <th>Checked Date &amp; Time</th>
-                  <th>Error Details</th>
-                </tr>
-              </thead>
-              <tbody id="bulk-results-tbody"></tbody>
-            </table>
+          <!-- PAGE: ACTIVITY LOGS -->
+          <div class="page-view hidden" data-page="activity-logs">
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2>Activity Logs</h2>
+                  <p class="muted">Sanitized operational audit trail. Credentials and access tokens are never recorded.</p>
+                </div>
+                <div class="actions">
+                  <button id="btn-log-refresh" class="btn-outline btn-compact" type="button">Refresh</button>
+                  <button id="btn-log-export" class="btn-navy btn-compact" type="button">Export Sanitized CSV</button>
+                </div>
+              </div>
+              <div class="filter-bar">
+                <select id="log-category-filter">
+                  <option value="">All Categories</option>
+                  <option value="client_config">Client Config</option>
+                  <option value="location_verification">Location Verification</option>
+                  <option value="job_completed">Job Completed</option>
+                  <option value="job_interrupted">Job Interrupted</option>
+                  <option value="captcha_detected">CAPTCHA Detected</option>
+                  <option value="sheet_update">Sheet Update</option>
+                  <option value="recovery">Recovery</option>
+                </select>
+                <select id="log-level-filter">
+                  <option value="">All Levels</option>
+                  <option value="info">Info</option>
+                  <option value="warning">Warning</option>
+                  <option value="error">Error</option>
+                </select>
+                <select id="log-client-filter"><option value="">All Clients</option></select>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Timestamp</th><th>Category</th><th>Level</th><th>Client</th><th>Message</th></tr></thead>
+                  <tbody id="log-tbody"></tbody>
+                </table>
+              </div>
+            </section>
           </div>
-        </div>
-      </section>
 
-      <section class="grid">
-        <article class="card">
-          <div class="card-header">
-            <h2>Extension Health &amp; Storage Check</h2>
-            <span id="dash-health-pill" class="pill pill-pending">Checking...</span>
-          </div>
-          <p id="dash-health-message" class="muted">
-            Running live health check against background service worker and chrome.storage.local...
-          </p>
-          <div class="card-actions">
-            <button id="dash-run-health-btn" class="btn-primary" type="button">
-              Run Health &amp; Storage Test
-            </button>
-          </div>
-          <dl class="details-list">
-            <div>
-              <dt>Service Worker</dt>
-              <dd id="detail-worker">-</dd>
-            </div>
-            <div>
-              <dt>Local Storage</dt>
-              <dd id="detail-storage">-</dd>
-            </div>
-            <div>
-              <dt>Last Checked</dt>
-              <dd id="detail-timestamp">-</dd>
-            </div>
-          </dl>
-        </article>
+          <!-- PAGE: SETTINGS (INCLUDES ADVANCED & DIAGNOSTICS) -->
+          <div class="page-view hidden" data-page="settings">
+            <section class="card">
+              <div class="card-header">
+                <h2>Agency Settings &amp; Diagnostics</h2>
+                <button id="btn-set-save" class="btn-navy btn-compact" type="button">Save Settings</button>
+              </div>
+              <div id="set-feedback" class="feedback-banner hidden" role="alert"></div>
+              <div class="form-grid-4">
+                <div class="form-row"><label for="set-depth">Default Search Depth</label><select id="set-depth"><option value="10">10</option><option value="20">20</option><option value="30">30</option><option value="50" selected>50</option><option value="100">100</option></select></div>
+                <div class="form-row"><label for="set-accuracy">Default Accuracy (m)</label><input id="set-accuracy" type="number" value="20" /></div>
+                <div class="form-row"><label for="set-country">Default Country</label><input id="set-country" type="text" value="Australia" /></div>
+                <div class="form-row"><label for="set-language">Default Language</label><input id="set-language" type="text" value="en-AU" /></div>
+              </div>
+              <div class="form-grid-3" style="margin-top: 10px;">
+                <div class="form-row"><label for="set-tolerance">Comparison Tolerance</label><input id="set-tolerance" type="number" value="1" /></div>
+                <div class="form-row"><label for="set-timezone">Reporting Timezone</label><input id="set-timezone" type="text" value="Australia/Sydney" /></div>
+                <div class="form-row"><label for="set-date-format">Sheet Date Format</label><select id="set-date-format"><option value="DD-MMMM">DD-MMMM (30-November)</option><option value="DD-MMM">DD-MMM (30-Nov)</option><option value="YYYY-MM-DD">YYYY-MM-DD</option></select></div>
+              </div>
 
-        <article class="card">
-          <div class="card-header">
-            <h2>Phase 4 Scope &amp; Guardrails</h2>
-            <span class="pill pill-healthy">Active</span>
-          </div>
-          <ul class="checklist">
-            <li>Excludes sponsored ads, local packs, PAA, AI Overviews, shopping, carousels, and sitelinks.</li>
-            <li>Exact domain &amp; legitimate subdomain matching without partial-name false positives.</li>
-            <li>Stops safely if location is unverified, mismatched, blocked, or interrupted by user.</li>
-            <li>No bulk keyword queues or Google Sheets edits yet.</li>
-          </ul>
-        </article>
-      </section>
+              <h3 class="subtable-title">System Diagnostics</h3>
+              <div class="metrics-grid">
+                <div class="summary-chip"><span class="summary-label">Extension Version</span><span id="diag-version" class="summary-val">-</span></div>
+                <div class="summary-chip"><span class="summary-label">Database Backend</span><span id="diag-db-backend" class="summary-val">-</span></div>
+                <div class="summary-chip"><span class="summary-label">Database Schema</span><span id="diag-schema-version" class="summary-val">-</span></div>
+                <div class="summary-chip"><span class="summary-label">Storage Estimate</span><span id="diag-storage-estimate" class="summary-val">-</span></div>
+              </div>
+            </section>
 
-      <section class="card roadmap-card">
-        <div class="card-header">
-          <h2>Development Phases</h2>
-          <span class="muted">1 phase at a time</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Phase</th>
-                <th>Milestone</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Phase 1</td>
-                <td>Clean previous Python project &amp; initialize Chrome extension</td>
-                <td><span class="pill pill-healthy">Completed</span></td>
-              </tr>
-              <tr>
-                <td>Phase 2</td>
-                <td>Browser geolocation simulation (Chrome Debugger API)</td>
-                <td><span class="pill pill-healthy">Completed</span></td>
-              </tr>
-              <tr>
-                <td>Phase 3</td>
-                <td>Google search location verification</td>
-                <td><span class="pill pill-healthy">Completed</span></td>
-              </tr>
-              <tr>
-                <td>Phase 4</td>
-                <td>Single keyword organic ranking detection</td>
-                <td><span class="pill pill-healthy">Completed</span></td>
-              </tr>
-              <tr>
-                <td>Phase 5</td>
-                <td>GS Location comparison &amp; accuracy validation lab</td>
-                <td><span class="pill pill-healthy">Completed</span></td>
-              </tr>
-              <tr>
-                <td>Phase 6</td>
-                <td>Bulk keyword checking &amp; job management</td>
-                <td><span class="pill pill-healthy">Completed</span></td>
-              </tr>
-              <tr>
-                <td>Phase 7</td>
-                <td>Multiple client configuration &amp; management</td>
-                <td><span class="pill pill-healthy">Completed</span></td>
-              </tr>
-              <tr>
-                <td>Phase 8</td>
-                <td>Google Sheets authentication, reading &amp; keyword import</td>
-                <td><span class="pill pill-healthy">Completed</span></td>
-              </tr>
-              <tr>
-                <td>Phase 9</td>
-                <td>Google Sheets updating with complete design preservation</td>
-                <td><span class="pill pill-healthy">Current</span></td>
-              </tr>
-              <tr>
-                <td>Phases 10–12</td>
-                <td>Agency history, weekly scheduling &amp; final deployment</td>
-                <td><span class="pill pill-neutral">Pending</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </main>
+            <!-- Advanced Developer Controls (Health Check, GPS Test URL, Single Keyword Check) -->
+            <section class="card">
+              <div class="card-header">
+                <div>
+                  <h2>Advanced &amp; Developer Tools</h2>
+                  <p class="muted">Single keyword spot-checking, Manual SERP HTML testing, Test URL override, and Service Worker diagnostics.</p>
+                </div>
+                <span id="rank-status-pill" class="pill pill-neutral">Ready</span>
+              </div>
+              <div class="form-row full-width" style="margin-bottom: 12px;">
+                <label for="loc-test-url">Controlled Test Page URL (Browser GPS diagnostics)</label>
+                <input id="loc-test-url" type="url" value="https://example.com/" />
+              </div>
+
+              <div class="context-summary-grid">
+                <div class="summary-chip"><span class="summary-label">Location</span><span id="rank-ctx-location" class="summary-val">Not configured</span></div>
+                <div class="summary-chip"><span class="summary-label">Coords</span><span id="rank-ctx-coords" class="summary-val">-</span></div>
+                <div class="summary-chip"><span class="summary-label">Google Loc</span><span id="rank-ctx-google" class="summary-val">Unverified</span></div>
+                <div class="summary-chip"><span class="summary-label">Locale</span><span id="rank-ctx-locale" class="summary-val">-</span></div>
+              </div>
+
+              <form id="ranking-form" class="location-form" novalidate>
+                <div class="form-grid-3">
+                  <div class="form-row"><label for="rank-domain">Client domain</label><input id="rank-domain" type="text" placeholder="example.com" /></div>
+                  <div class="form-row"><label for="rank-keyword">Target keyword</label><input id="rank-keyword" type="text" placeholder="seo agency sydney" /></div>
+                  <div class="form-row"><label for="rank-depth">Depth</label><select id="rank-depth"><option value="10">10</option><option value="20">20</option><option value="30">30</option><option value="50" selected>50</option><option value="100">100</option></select></div>
+                </div>
+                <div class="manual-html-box">
+                  <label class="checkbox-inline"><input id="rank-use-manual-html" type="checkbox" /> Use Manual SERP HTML (never written to live sheets)</label>
+                  <div id="rank-manual-panel" class="manual-panel hidden">
+                    <div class="form-row"><label for="rank-manual-file">Upload HTML</label><input id="rank-manual-file" type="file" accept=".html,.htm" /></div>
+                    <div class="form-row"><label for="rank-manual-html">Paste HTML</label><textarea id="rank-manual-html" rows="4"></textarea></div>
+                  </div>
+                </div>
+                <div id="rank-feedback" class="feedback-banner hidden" role="alert"></div>
+                <div class="button-bar">
+                  <button id="btn-check-ranking" class="btn-navy" type="submit">Check Ranking</button>
+                  <button id="btn-stop-ranking" class="btn-outline" type="button" disabled>Stop</button>
+                  <button id="btn-clear-ranking" class="btn-outline btn-reset" type="button">Clear Results</button>
+                </div>
+              </form>
+              <div id="rank-result-panel" class="status-panel hidden">
+                <div class="action-group-header"><h3>Single Check Result</h3><span id="res-source-badge" class="pill pill-neutral">-</span></div>
+                <div class="kv-list">
+                  <div class="kv-row"><span class="kv-label">Data source</span><span id="res-source-label" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Status</span><span id="res-status" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Keyword</span><span id="res-keyword" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Website</span><span id="res-website" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Position</span><span id="res-position" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">URL</span><span id="res-url" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Checked / Depth</span><span id="res-depth-count" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Browser GPS</span><span id="res-gps-status" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Google status</span><span id="res-google-status" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Google source</span><span id="res-google-source" class="summary-val kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Timestamp</span><span id="res-checked-at" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Duration</span><span id="res-duration" class="kv-value">-</span></div>
+                  <div class="kv-row"><span class="kv-label">Error</span><span id="res-error" class="kv-value">None</span></div>
+                </div>
+                <div class="table-wrap" style="margin-top: 10px;">
+                  <table><thead><tr><th>Pos</th><th>Title</th><th>URL</th></tr></thead><tbody id="rank-results-tbody"></tbody></table>
+                </div>
+              </div>
+
+              <div class="status-panel" style="margin-top: 16px;">
+                <div class="card-header">
+                  <h3>Extension Health &amp; Storage Check</h3>
+                  <span id="dash-health-pill" class="pill pill-pending">Checking...</span>
+                </div>
+                <p id="dash-health-message" class="muted">Checking background worker...</p>
+                <button id="dash-run-health-btn" class="btn-primary btn-compact" type="button" style="margin: 8px 0;">Run Health &amp; Storage Test</button>
+                <dl class="details-list">
+                  <div><dt>Service Worker</dt><dd id="detail-worker">-</dd></div>
+                  <div><dt>Local Storage</dt><dd id="detail-storage">-</dd></div>
+                  <div><dt>Last Checked</dt><dd id="detail-timestamp">-</dd></div>
+                </dl>
+              </div>
+            </section>
+          </div>
+
+          <!-- PAGE: HELP & DOCS -->
+          <div class="page-view hidden" data-page="help">
+            <section class="card">
+              <h2>Help, Onboarding &amp; Safeguard Guide</h2>
+              <ol style="padding-left: 20px; line-height: 1.7; font-size: 13.5px; margin: 12px 0;">
+                <li><strong>Create a Client:</strong> Go to <em>Clients &rarr; + Add Client</em>, enter website domain, Google Sheet URL, and add client locations.</li>
+                <li><strong>Import Keywords Safely:</strong> Open <em>Google Sheets</em>, connect Google OAuth (<code>docs/GOOGLE_CLOUD_SETUP.md</code>), preview sheet groups/rows, and confirm import.</li>
+                <li><strong>Run Verified Ranking Checks:</strong> Open <em>Jobs &amp; Checks</em>, verify GPS &amp; Google Search location on the visible tab, and start bulk ranking.</li>
+                <li><strong>Review History &amp; Update Sheets:</strong> Inspect movements in <em>Keyword Rankings</em> / <em>Ranking History</em>, create a mandatory recoverable backup, verify the Dry-Run Preview, and confirm spreadsheet update in <em>Google Sheets</em>.</li>
+              </ol>
+
+              <h3>Development Roadmap Status</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Phase</th><th>Milestone</th><th>Status</th></tr></thead>
+                  <tbody>
+                    <tr><td>Phases 1–9</td><td>Extension core, geolocation, Google verification, ranking, Accuracy Lab, bulk jobs, multi-client &amp; Google Sheets read/write</td><td><span class="pill pill-healthy">Completed</span></td></tr>
+                    <tr><td>Phase 10</td><td>Agency SaaS dashboard, historical database, charts, reports &amp; logging</td><td><span class="pill pill-healthy">Current</span></td></tr>
+                    <tr><td>Phase 11–12</td><td>Weekly scheduling, final QA &amp; agency deployment</td><td><span class="pill pill-neutral">Pending</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
 
     <script type="module" src="dashboard.js"></script>
   </body>
