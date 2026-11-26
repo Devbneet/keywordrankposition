@@ -53,3 +53,4 @@ export function exportComparisonCsv(report) {
 export function exportComparisonJson(report) {
   return JSON.stringify(report, null, 2);
 }
+

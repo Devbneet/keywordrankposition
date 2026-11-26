@@ -201,3 +201,4 @@ export async function saveValidationState(storageClient, nextState) {
 export async function clearValidationState(storageClient) {
   return saveValidationState(storageClient, createDefaultValidationState());
 }
+
