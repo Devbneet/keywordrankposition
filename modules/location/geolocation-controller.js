@@ -9,6 +9,7 @@ import {
   buildGoogleLocationCheckUrl,
   verifyGoogleSearchLocation,
 } from "./google-location-verifier.js";
+import { invalidateRankingResultsOnLocationChange } from "../ranking/ranking-state.js";
 import {
   clearVerificationFields,
   createDefaultLocationState,
@@ -466,6 +467,7 @@ export function createGeolocationController({ chromeApi = globalThis.chrome, sto
       googleDetectedLocation: googleRes.detectedLocation,
       googleLocationSource: googleRes.locationSource,
       googleLocationSourceType: googleRes.locationSourceType,
+      googleMatchType: googleRes.matchType || "none",
       googleLastVerifiedAt: googleRes.checkedAt,
       googleVerificationEvidence: {
         pageUrl: googleRes.pageUrl,
@@ -538,12 +540,17 @@ export function createGeolocationController({ chromeApi = globalThis.chrome, sto
       state: current.config ? LOCATION_STATES.CONFIGURED : LOCATION_STATES.NOT_CONFIGURED,
     });
 
+    await invalidateRankingResultsOnLocationChange(storageClient, "Location session was reset.");
     return { ok: true, state: nextState };
   }
 
   async function handleDebuggerDetached({ tabId, reason }) {
     const current = await loadLocationState(storageClient);
     if (current.tabId !== null && current.tabId === tabId && current.debuggerAttached) {
+      await invalidateRankingResultsOnLocationChange(
+        storageClient,
+        `Debugger disconnected (${reason || "unknown reason"}).`
+      );
       return saveLocationState(storageClient, {
         ...clearVerificationFields(current, { preserveTab: true }),
         debuggerAttached: false,
@@ -560,6 +567,9 @@ export function createGeolocationController({ chromeApi = globalThis.chrome, sto
     const current = await loadLocationState(storageClient);
     if (current.tabId !== null && current.tabId === tabId) {
       const wasAttached = Boolean(current.debuggerAttached);
+      if (wasAttached) {
+        await invalidateRankingResultsOnLocationChange(storageClient, "Dedicated search tab was closed.");
+      }
       return saveLocationState(storageClient, {
         ...clearVerificationFields(current, { preserveTab: false }),
         browserGpsStatus: wasAttached

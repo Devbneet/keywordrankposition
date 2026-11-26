@@ -25,6 +25,7 @@ export function createDefaultRankingState() {
     activeJobId: null,
     stopRequested: false,
     lastResult: null,
+    recentResults: [],
   };
 }
 
@@ -37,6 +38,7 @@ export async function loadRankingState(storageClient) {
   return {
     ...createDefaultRankingState(),
     ...saved,
+    recentResults: Array.isArray(saved.recentResults) ? saved.recentResults : [],
   };
 }
 
@@ -44,6 +46,7 @@ export async function saveRankingState(storageClient, nextState) {
   const normalized = {
     ...createDefaultRankingState(),
     ...nextState,
+    recentResults: Array.isArray(nextState?.recentResults) ? nextState.recentResults : [],
   };
   await storageClient.set({ [RANKING_STORAGE_KEY]: normalized });
   return normalized;
@@ -51,4 +54,29 @@ export async function saveRankingState(storageClient, nextState) {
 
 export async function clearRankingState(storageClient) {
   return saveRankingState(storageClient, createDefaultRankingState());
+}
+
+/**
+ * Mark saved live ranking results as invalidated if location changes unexpectedly.
+ */
+export async function invalidateRankingResultsOnLocationChange(storageClient, reason) {
+  const current = await loadRankingState(storageClient);
+  if (!current.lastResult && current.recentResults.length === 0) {
+    return current;
+  }
+
+  const markInvalid = (item) => {
+    if (!item || item.sourceMode === "manual_html") return item;
+    return {
+      ...item,
+      invalidatedByLocationChange: true,
+      invalidationReason: reason || "Location session changed or detached.",
+    };
+  };
+
+  return saveRankingState(storageClient, {
+    ...current,
+    lastResult: markInvalid(current.lastResult),
+    recentResults: current.recentResults.map(markInvalid),
+  });
 }

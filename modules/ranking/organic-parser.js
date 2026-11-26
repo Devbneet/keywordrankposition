@@ -369,6 +369,10 @@ export function parseGoogleSerpHtml({ html, pageUrl = "https://www.google.com/se
     results.length === 0 &&
     /did not match any documents|no results found for/i.test(html);
 
+  const endOfResultsVerified = Boolean(
+    confirmedEmpty || (results.length > 0 && !nextPageUrl)
+  );
+
   return {
     ok: true,
     blocked: false,
@@ -376,5 +380,6 @@ export function parseGoogleSerpHtml({ html, pageUrl = "https://www.google.com/se
     results,
     nextPageUrl,
     confirmedEmpty,
+    endOfResultsVerified,
   };
 }

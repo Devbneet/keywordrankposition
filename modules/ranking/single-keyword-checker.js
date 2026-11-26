@@ -1,10 +1,17 @@
 /**
  * Single Keyword Organic Ranking Checker combining Phase 2/3 location verification,
- * authorized SERP fetching (with pagination) or manual SERP HTML, and Stop support.
+ * live GPS + Google location re-verification during checks, authorized SERP fetching
+ * (with pagination) or manual SERP HTML, and Stop support.
  */
 
 import { getCountryPreset } from "../location/coordinate-validator.js";
-import { GOOGLE_LOCATION_STATUSES, LOCATION_STATES } from "../location/location-state.js";
+import { verifyBrowserGeolocation } from "../location/geolocation-verifier.js";
+import { inspectGoogleSearchHtml } from "../location/google-location-verifier.js";
+import {
+  GOOGLE_LOCATION_STATUSES,
+  hasConfigChanged,
+  LOCATION_STATES,
+} from "../location/location-state.js";
 import { normalizeDomain } from "./domain-matcher.js";
 import { parseGoogleSerpHtml } from "./organic-parser.js";
 import { calculateOrganicRanking } from "./ranking-calculator.js";
@@ -15,6 +22,8 @@ import {
   saveRankingState,
   SUPPORTED_SEARCH_DEPTHS,
 } from "./ranking-state.js";
+
+const DEFAULT_MAX_LOCATION_AGE_MS = 15 * 60 * 1000;
 
 function buildKeywordSearchUrl({
   keyword,
@@ -30,6 +39,19 @@ function buildKeywordSearchUrl({
   return `https://www.${domain}/search?q=${q}&hl=${hl}&gl=${gl}`;
 }
 
+function isLocationVerificationStale(locationState, maxAgeMs = DEFAULT_MAX_LOCATION_AGE_MS) {
+  if (!locationState?.googleLastVerifiedAt || !locationState?.lastVerifiedAt) {
+    return true;
+  }
+  const googleTime = Date.parse(locationState.googleLastVerifiedAt);
+  const gpsTime = Date.parse(locationState.lastVerifiedAt);
+  if (!Number.isFinite(googleTime) || !Number.isFinite(gpsTime)) {
+    return true;
+  }
+  const now = Date.now();
+  return now - googleTime > maxAgeMs || now - gpsTime > maxAgeMs;
+}
+
 function buildResultRecord({
   keyword,
   targetWebsite,
@@ -39,10 +61,14 @@ function buildResultRecord({
   position = null,
   rankingUrl = null,
   checkedResults = 0,
+  verifiedEndOfResults = false,
   resultsTable = [],
   errorDetails = null,
+  sourceMode = "live_google",
+  deviceType = "Desktop",
   startedAtMs,
 }) {
+  const isManual = sourceMode === "manual_html";
   return {
     keyword: String(keyword || "").trim(),
     targetWebsite: String(targetWebsite || "").trim(),
@@ -50,14 +76,27 @@ function buildResultRecord({
     rankingUrl,
     checkedResults,
     requestedDepth,
-    browserGpsStatus: locationState?.browserGpsStatus || LOCATION_STATES.NOT_CONFIGURED,
-    googleLocationStatus: locationState?.googleLocationStatus || GOOGLE_LOCATION_STATUSES.UNVERIFIED,
-    googleLocationSource: locationState?.googleLocationSource || null,
-    googleDetectedLocation: locationState?.googleDetectedLocation || null,
+    verifiedEndOfResults,
+    sourceMode,
+    isLiveVerified: !isManual && status !== RANKING_STATUSES.LOCATION_UNVERIFIED && status !== RANKING_STATUSES.LOCATION_MISMATCH,
+    sourceLabel: isManual ? "Manual SERP HTML (Not Live Verified)" : "Live Google Search (Authorized)",
+    deviceType,
+    configSnapshot: locationState?.config ? { ...locationState.config } : null,
+    browserGpsStatus: isManual
+      ? "Not used (Manual SERP HTML)"
+      : locationState?.browserGpsStatus || LOCATION_STATES.NOT_CONFIGURED,
+    googleLocationStatus: isManual
+      ? "Not verified (Manual SERP HTML)"
+      : locationState?.googleLocationStatus || GOOGLE_LOCATION_STATUSES.UNVERIFIED,
+    googleLocationSource: isManual ? "Manual HTML upload/paste" : locationState?.googleLocationSource || null,
+    googleLocationSourceType: isManual ? "manual" : locationState?.googleLocationSourceType || null,
+    googleMatchType: isManual ? "none" : locationState?.googleMatchType || "none",
+    googleDetectedLocation: isManual ? null : locationState?.googleDetectedLocation || null,
     checkedAt: new Date().toISOString(),
     durationMs: Math.max(0, Date.now() - startedAtMs),
     status,
     errorDetails,
+    invalidatedByLocationChange: false,
     resultsTable,
   };
 }
@@ -97,13 +136,24 @@ export function createSingleKeywordChecker({
     throw new Error("storageClient is required for createSingleKeywordChecker.");
   }
 
-  // In-memory cancellation registry so Stop button cancels active async loops immediately.
   const activeJobs = new Map();
 
   async function isStopRequested(jobId) {
     if (activeJobs.get(jobId)?.stopRequested) return true;
     const state = await loadRankingState(storageClient);
     return Boolean(state.stopRequested || state.activeJobId !== jobId);
+  }
+
+  async function persistFinalResult(result) {
+    const existing = await loadRankingState(storageClient);
+    const nextRecent = [result, ...existing.recentResults].slice(0, 50);
+    return saveRankingState(storageClient, {
+      isRunning: false,
+      activeJobId: null,
+      stopRequested: false,
+      lastResult: result,
+      recentResults: nextRecent,
+    });
   }
 
   async function getState() {
@@ -134,6 +184,8 @@ export function createSingleKeywordChecker({
     manualSerpHtml = "",
     manualSerpPages = null,
     useManualHtml = false,
+    deviceType = "Desktop",
+    maxLocationAgeMs = DEFAULT_MAX_LOCATION_AGE_MS,
   } = {}) {
     const startedAtMs = Date.now();
     const depth = Number(searchDepth) || 50;
@@ -162,11 +214,13 @@ export function createSingleKeywordChecker({
     const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     activeJobs.set(jobId, { stopRequested: false });
 
+    const existingRankingState = await loadRankingState(storageClient);
     const currentLocation = locationController
       ? await locationController.getStatus({ reverifyGps: false })
       : null;
 
     await saveRankingState(storageClient, {
+      ...existingRankingState,
       isRunning: true,
       activeJobId: jobId,
       stopRequested: false,
@@ -174,11 +228,12 @@ export function createSingleKeywordChecker({
     });
 
     try {
-      // Mode 1: Manually supplied SERP HTML (1 or more pages)
+      // Mode 1: Manually supplied SERP HTML (explicitly marked as non-live-verified)
       if (useManualHtml || (Array.isArray(manualSerpPages) && manualSerpPages.length > 0)) {
-        const htmlPages = Array.isArray(manualSerpPages) && manualSerpPages.length > 0
-          ? manualSerpPages
-          : [String(manualSerpHtml || "")];
+        const htmlPages =
+          Array.isArray(manualSerpPages) && manualSerpPages.length > 0
+            ? manualSerpPages
+            : [String(manualSerpHtml || "")];
 
         if (htmlPages.every((h) => !String(h || "").trim())) {
           const result = buildResultRecord({
@@ -188,14 +243,11 @@ export function createSingleKeywordChecker({
             locationState: currentLocation,
             status: RANKING_STATUSES.PARSING_ERROR,
             errorDetails: "Manual SERP HTML is empty.",
+            sourceMode: "manual_html",
+            deviceType,
             startedAtMs,
           });
-          const saved = await saveRankingState(storageClient, {
-            isRunning: false,
-            activeJobId: null,
-            stopRequested: false,
-            lastResult: result,
-          });
+          const saved = await persistFinalResult(result);
           return { ok: false, result, state: saved };
         }
 
@@ -209,14 +261,11 @@ export function createSingleKeywordChecker({
               locationState: currentLocation,
               status: RANKING_STATUSES.STOPPED_BY_USER,
               errorDetails: "Ranking check was stopped by user.",
+              sourceMode: "manual_html",
+              deviceType,
               startedAtMs,
             });
-            const saved = await saveRankingState(storageClient, {
-              isRunning: false,
-              activeJobId: null,
-              stopRequested: false,
-              lastResult: stopped,
-            });
+            const saved = await persistFinalResult(stopped);
             return { ok: false, result: stopped, state: saved };
           }
           const parsed = parseGoogleSerpHtml({ html: htmlPages[i] });
@@ -241,19 +290,16 @@ export function createSingleKeywordChecker({
           requestedDepth: depth,
           locationState: currentLocation,
           ...calc,
+          sourceMode: "manual_html",
+          deviceType,
           startedAtMs,
         });
-        const saved = await saveRankingState(storageClient, {
-          isRunning: false,
-          activeJobId: null,
-          stopRequested: false,
-          lastResult: result,
-        });
+        const saved = await persistFinalResult(result);
         return { ok: result.status === RANKING_STATUSES.RANKED, result, state: saved };
       }
 
-      // Mode 2: Live authorized Google Search tab — require verified location first!
-      const liveLocation = locationController
+      // Mode 2: Live authorized Google Search tab — enforce fresh location verification gate!
+      let liveLocation = locationController
         ? await locationController.getStatus({ reverifyGps: true })
         : null;
 
@@ -281,6 +327,9 @@ export function createSingleKeywordChecker({
       } else if (liveLocation.googleLocationStatus !== GOOGLE_LOCATION_STATUSES.MATCHED) {
         gateStatus = RANKING_STATUSES.LOCATION_UNVERIFIED;
         gateError = "Google search location is not verified. Click Verify Google Location first.";
+      } else if (isLocationVerificationStale(liveLocation, maxLocationAgeMs)) {
+        gateStatus = RANKING_STATUSES.LOCATION_UNVERIFIED;
+        gateError = "Location verification is stale. Re-verify Google location before checking rankings.";
       }
 
       if (gateStatus) {
@@ -291,25 +340,22 @@ export function createSingleKeywordChecker({
           locationState: liveLocation,
           status: gateStatus,
           errorDetails: gateError,
+          sourceMode: "live_google",
+          deviceType,
           startedAtMs,
         });
-        const saved = await saveRankingState(storageClient, {
-          isRunning: false,
-          activeJobId: null,
-          stopRequested: false,
-          lastResult: blockedResult,
-        });
+        const saved = await persistFinalResult(blockedResult);
         return { ok: false, result: blockedResult, state: saved };
       }
 
+      const initialConfig = { ...liveLocation.config };
       const tabId = liveLocation.tabId;
-      const cfg = liveLocation.config;
       const parsedPages = [];
       let nextUrl = buildKeywordSearchUrl({
         keyword: cleanKeyword,
-        googleDomain: cfg.googleDomain,
-        country: cfg.country,
-        language: cfg.language,
+        googleDomain: initialConfig.googleDomain,
+        country: initialConfig.country,
+        language: initialConfig.language,
       });
       let collectedCount = 0;
       let pageNumber = 1;
@@ -325,15 +371,33 @@ export function createSingleKeywordChecker({
             status: RANKING_STATUSES.STOPPED_BY_USER,
             checkedResults: collectedCount,
             errorDetails: "Ranking check was stopped by user.",
+            sourceMode: "live_google",
+            deviceType,
             startedAtMs,
           });
-          const saved = await saveRankingState(storageClient, {
-            isRunning: false,
-            activeJobId: null,
-            stopRequested: false,
-            lastResult: stopped,
-          });
+          const saved = await persistFinalResult(stopped);
           return { ok: false, result: stopped, state: saved };
+        }
+
+        // Detect unexpected config change mid-job
+        if (locationController) {
+          const latestStatus = await locationController.getStatus({ reverifyGps: false });
+          if (!latestStatus.config || hasConfigChanged(initialConfig, latestStatus.config)) {
+            const invalidated = buildResultRecord({
+              keyword: cleanKeyword,
+              targetWebsite: cleanDomain,
+              requestedDepth: depth,
+              locationState: latestStatus,
+              status: RANKING_STATUSES.LOCATION_UNVERIFIED,
+              checkedResults: collectedCount,
+              errorDetails: "Location configuration changed during ranking check.",
+              sourceMode: "live_google",
+              deviceType,
+              startedAtMs,
+            });
+            const saved = await persistFinalResult(invalidated);
+            return { ok: false, result: invalidated, state: saved };
+          }
         }
 
         try {
@@ -363,14 +427,11 @@ export function createSingleKeywordChecker({
             ...(partialCalc || {}),
             status,
             errorDetails: `Failed loading search page ${pageNumber}: ${msg}`,
+            sourceMode: "live_google",
+            deviceType,
             startedAtMs,
           });
-          const saved = await saveRankingState(storageClient, {
-            isRunning: false,
-            activeJobId: null,
-            stopRequested: false,
-            lastResult: errResult,
-          });
+          const saved = await persistFinalResult(errResult);
           return { ok: false, result: errResult, state: saved };
         }
 
@@ -383,15 +444,45 @@ export function createSingleKeywordChecker({
             status: RANKING_STATUSES.STOPPED_BY_USER,
             checkedResults: collectedCount,
             errorDetails: "Ranking check was stopped by user.",
+            sourceMode: "live_google",
+            deviceType,
             startedAtMs,
           });
-          const saved = await saveRankingState(storageClient, {
-            isRunning: false,
-            activeJobId: null,
-            stopRequested: false,
-            lastResult: stopped,
-          });
+          const saved = await persistFinalResult(stopped);
           return { ok: false, result: stopped, state: saved };
+        }
+
+        // Re-verify browser GPS during the ranking check on the loaded SERP page
+        const midGpsCheck = await verifyBrowserGeolocation({
+          tabId,
+          expectedLatitude: initialConfig.latitude,
+          expectedLongitude: initialConfig.longitude,
+          chromeApi,
+        });
+        if (midGpsCheck.state !== LOCATION_STATES.GPS_VERIFIED) {
+          const status =
+            midGpsCheck.state === LOCATION_STATES.PERMISSION_DENIED
+              ? RANKING_STATUSES.PERMISSION_DENIED
+              : midGpsCheck.state === LOCATION_STATES.LOCATION_MISMATCH
+                ? RANKING_STATUSES.LOCATION_MISMATCH
+                : RANKING_STATUSES.LOCATION_UNVERIFIED;
+          const gpsFailResult = buildResultRecord({
+            keyword: cleanKeyword,
+            targetWebsite: cleanDomain,
+            requestedDepth: depth,
+            locationState: { ...liveLocation, browserGpsStatus: midGpsCheck.state },
+            status,
+            checkedResults: collectedCount,
+            errorDetails:
+              midGpsCheck.state === LOCATION_STATES.DEBUGGER_DISCONNECTED
+                ? `Debugger disconnected: ${midGpsCheck.lastError}`
+                : midGpsCheck.lastError || `Browser GPS check returned '${midGpsCheck.state}'.`,
+            sourceMode: "live_google",
+            deviceType,
+            startedAtMs,
+          });
+          const saved = await persistFinalResult(gpsFailResult);
+          return { ok: false, result: gpsFailResult, state: saved };
         }
 
         let evalResponse;
@@ -421,32 +512,73 @@ export function createSingleKeywordChecker({
             ...(calc || {}),
             status: detached ? RANKING_STATUSES.LOCATION_UNVERIFIED : RANKING_STATUSES.INCOMPLETE_SEARCH,
             errorDetails: detached ? `Debugger disconnected: ${msg}` : msg,
+            sourceMode: "live_google",
+            deviceType,
             startedAtMs,
           });
-          const saved = await saveRankingState(storageClient, {
-            isRunning: false,
-            activeJobId: null,
-            stopRequested: false,
-            lastResult: errResult,
-          });
+          const saved = await persistFinalResult(errResult);
           return { ok: false, result: errResult, state: saved };
         }
 
         const snapshot = evalResponse?.result?.value;
-        const parsed = parseGoogleSerpHtml({
-          html: snapshot?.html || "",
-          pageUrl: snapshot?.pageUrl || nextUrl,
-        });
+        const pageHtml = snapshot?.html || "";
+        const pageHref = snapshot?.pageUrl || nextUrl;
 
-        if (parsed.blocked || parsed.parsingError) {
+        // Parse SERP first so CAPTCHA/block stops immediately
+        const parsed = parseGoogleSerpHtml({ html: pageHtml, pageUrl: pageHref });
+        if (parsed.blocked) {
           parsedPages.push({ ...parsed, pageNumber });
           break;
+        }
+        if (parsed.parsingError) {
+          parsedPages.push({ ...parsed, pageNumber });
+          break;
+        }
+
+        // Re-verify Google's displayed location on this SERP page if footer location is present
+        const googleFooterCheck = inspectGoogleSearchHtml({
+          html: pageHtml,
+          pageUrl: pageHref,
+          targetCity: initialConfig.targetCity || initialConfig.locationName,
+          targetCountry: initialConfig.country,
+        });
+        if (googleFooterCheck.status === GOOGLE_LOCATION_STATUSES.MISMATCH) {
+          const mismatchResult = buildResultRecord({
+            keyword: cleanKeyword,
+            targetWebsite: cleanDomain,
+            requestedDepth: depth,
+            locationState: {
+              ...liveLocation,
+              googleLocationStatus: googleFooterCheck.status,
+              googleDetectedLocation: googleFooterCheck.detectedLocation,
+              googleLocationSource: googleFooterCheck.locationSource,
+              googleLocationSourceType: googleFooterCheck.locationSourceType,
+              googleMatchType: googleFooterCheck.matchType,
+            },
+            status: RANKING_STATUSES.LOCATION_MISMATCH,
+            checkedResults: collectedCount,
+            errorDetails: googleFooterCheck.error,
+            sourceMode: "live_google",
+            deviceType,
+            startedAtMs,
+          });
+          const saved = await persistFinalResult(mismatchResult);
+          return { ok: false, result: mismatchResult, state: saved };
+        }
+        if (googleFooterCheck.status === GOOGLE_LOCATION_STATUSES.MATCHED) {
+          liveLocation = {
+            ...liveLocation,
+            googleLocationStatus: googleFooterCheck.status,
+            googleDetectedLocation: googleFooterCheck.detectedLocation,
+            googleLocationSource: googleFooterCheck.locationSource,
+            googleLocationSourceType: googleFooterCheck.locationSourceType,
+            googleMatchType: googleFooterCheck.matchType,
+          };
         }
 
         parsedPages.push({ ...parsed, pageNumber });
         collectedCount += parsed.results.length;
 
-        // Early check: if target already ranked on this page, stop paginating immediately
         const interim = calculateOrganicRanking({
           pages: parsedPages,
           targetDomain: cleanDomain,
@@ -459,22 +591,17 @@ export function createSingleKeywordChecker({
             requestedDepth: depth,
             locationState: liveLocation,
             ...interim,
+            sourceMode: "live_google",
+            deviceType,
             startedAtMs,
           });
-          const saved = await saveRankingState(storageClient, {
-            isRunning: false,
-            activeJobId: null,
-            stopRequested: false,
-            lastResult: result,
-          });
+          const saved = await persistFinalResult(result);
           return { ok: true, result, state: saved };
         }
 
-        if (collectedCount < depth && !parsed.nextPageUrl && !parsed.confirmedEmpty) {
-          // If fewer results were returned than requested and there is no next page,
-          // mark incomplete only if Google returned 0 results without confirmedEmpty.
-          if (parsed.results.length === 0) {
-            incompleteReason = "Google returned zero extractable organic results.";
+        if (collectedCount < depth && !parsed.nextPageUrl) {
+          if (!parsed.endOfResultsVerified) {
+            incompleteReason = "Search ended before reaching requested depth without verified end of results.";
           }
           break;
         }
@@ -496,15 +623,12 @@ export function createSingleKeywordChecker({
         requestedDepth: depth,
         locationState: liveLocation,
         ...finalCalc,
+        sourceMode: "live_google",
+        deviceType,
         startedAtMs,
       });
 
-      const saved = await saveRankingState(storageClient, {
-        isRunning: false,
-        activeJobId: null,
-        stopRequested: false,
-        lastResult: finalResult,
-      });
+      const saved = await persistFinalResult(finalResult);
       return { ok: finalResult.status === RANKING_STATUSES.RANKED, result: finalResult, state: saved };
     } finally {
       activeJobs.delete(jobId);

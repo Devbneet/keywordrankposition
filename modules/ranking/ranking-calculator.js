@@ -8,6 +8,8 @@ import { RANKING_STATUSES } from "./ranking-state.js";
 
 /**
  * Calculate ranking outcome from parsed SERP pages without fabricating results.
+ * Never returns "Not found within verified search depth" (NA) if the requested
+ * depth was not checked and end-of-results was not genuinely verified.
  */
 export function calculateOrganicRanking({
   pages,
@@ -18,10 +20,11 @@ export function calculateOrganicRanking({
   const depth = Number(requestedDepth) || 50;
   const flattened = [];
   const seenUrls = new Set();
-  let hasIncompletePage = Boolean(incompleteReason);
-  let lastError = incompleteReason;
+  const pageList = Array.isArray(pages) ? pages : [];
+  let hasIncompletePage = Boolean(incompleteReason) || pageList.length === 0;
+  let lastError = incompleteReason || (pageList.length === 0 ? "No SERP pages were checked." : null);
 
-  for (const page of pages || []) {
+  for (const page of pageList) {
     if (page.blocked) {
       return {
         status: RANKING_STATUSES.SEARCH_BLOCKED,
@@ -29,6 +32,7 @@ export function calculateOrganicRanking({
         rankingUrl: null,
         checkedResults: flattened.length,
         requestedDepth: depth,
+        verifiedEndOfResults: false,
         resultsTable: flattened,
         errorDetails: page.blockReason || "Google Search access restricted.",
       };
@@ -41,6 +45,7 @@ export function calculateOrganicRanking({
         rankingUrl: null,
         checkedResults: flattened.length,
         requestedDepth: depth,
+        verifiedEndOfResults: false,
         resultsTable: flattened,
         errorDetails: page.parsingError,
       };
@@ -85,21 +90,38 @@ export function calculateOrganicRanking({
       rankingUrl: matched.url,
       checkedResults: flattened.length,
       requestedDepth: depth,
+      verifiedEndOfResults: true,
       resultsTable: flattened,
       errorDetails: null,
     };
   }
 
-  // Never report NA ("Not found within verified search depth") when search was incomplete.
-  if (hasIncompletePage) {
+  const lastPage = pageList.length > 0 ? pageList[pageList.length - 1] : null;
+  const reachedRequestedDepth = flattened.length >= depth;
+  const genuineEndReached = Boolean(
+    lastPage &&
+      lastPage.endOfResultsVerified === true &&
+      !lastPage.nextPageUrl &&
+      !lastPage.incompleteReason
+  );
+
+  // Never report NA ("Not found within verified search depth") unless the requested
+  // depth was checked OR a genuine end of Google results was verified.
+  if (hasIncompletePage || (!reachedRequestedDepth && !genuineEndReached)) {
+    const reason =
+      lastError ||
+      (lastPage?.nextPageUrl
+        ? `Only ${flattened.length} of ${depth} requested organic results were checked before pagination stopped.`
+        : `Checked ${flattened.length} of ${depth} requested results without verified end of results.`);
     return {
       status: RANKING_STATUSES.INCOMPLETE_SEARCH,
       position: null,
       rankingUrl: null,
       checkedResults: flattened.length,
       requestedDepth: depth,
+      verifiedEndOfResults: false,
       resultsTable: flattened,
-      errorDetails: lastError || "Search ended before reaching requested depth.",
+      errorDetails: reason,
     };
   }
 
@@ -109,6 +131,7 @@ export function calculateOrganicRanking({
     rankingUrl: null,
     checkedResults: flattened.length,
     requestedDepth: depth,
+    verifiedEndOfResults: true,
     resultsTable: flattened,
     errorDetails: null,
   };

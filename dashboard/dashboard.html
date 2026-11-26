@@ -18,7 +18,7 @@
         </div>
         <div class="meta-badges">
           <span class="version-chip">v<span id="dash-version">-</span></span>
-          <span id="dash-phase-chip" class="phase-chip">Phase 4: Single Keyword Ranking</span>
+          <span id="dash-phase-chip" class="phase-chip">Phase 5: Ranking Accuracy Lab</span>
         </div>
       </div>
     </header>
@@ -289,8 +289,15 @@
         </form>
 
         <div id="rank-result-panel" class="status-panel hidden">
-          <h3>Ranking Result Details</h3>
+          <div class="action-group-header">
+            <h3>Ranking Result Details</h3>
+            <span id="res-source-badge" class="pill pill-neutral">-</span>
+          </div>
           <div class="kv-list">
+            <div class="kv-row">
+              <span class="kv-label">Data source</span>
+              <span id="res-source-label" class="kv-value">-</span>
+            </div>
             <div class="kv-row">
               <span class="kv-label">Result status</span>
               <span id="res-status" class="kv-value">-</span>
@@ -352,6 +359,174 @@
                 </tr>
               </thead>
               <tbody id="rank-results-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="card accuracy-card">
+        <div class="card-header">
+          <div>
+            <h2>Ranking Accuracy Lab (Phase 5)</h2>
+            <p class="muted">
+              Compare extension ranking results against manually verified GS Location Changer baselines.
+              Reuses configured website domain, target location, lat/lng, country, language, and search depth.
+            </p>
+          </div>
+          <span id="acc-status-pill" class="pill pill-neutral">Pending Validation</span>
+        </div>
+
+        <div class="context-summary-grid">
+          <div class="summary-chip">
+            <span class="summary-label">Website Domain</span>
+            <span id="acc-ctx-domain" class="summary-val">-</span>
+          </div>
+          <div class="summary-chip">
+            <span class="summary-label">Target Location &amp; Coords</span>
+            <span id="acc-ctx-location" class="summary-val">Not configured</span>
+          </div>
+          <div class="summary-chip">
+            <span class="summary-label">Country / Language</span>
+            <span id="acc-ctx-locale" class="summary-val">-</span>
+          </div>
+          <div class="summary-chip">
+            <span class="summary-label">Search Depth</span>
+            <span id="acc-ctx-depth" class="summary-val">50</span>
+          </div>
+        </div>
+
+        <div class="location-form">
+          <div class="form-grid-3">
+            <div class="form-row">
+              <label for="acc-device">Device type</label>
+              <select id="acc-device">
+                <option value="Desktop" selected>Desktop</option>
+                <option value="Mobile">Mobile</option>
+              </select>
+            </div>
+
+            <div class="form-row">
+              <label for="acc-tolerance">Ranking tolerance (&plusmn; positions)</label>
+              <select id="acc-tolerance">
+                <option value="0">0 (Exact only)</option>
+                <option value="1" selected>1 (Default)</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+              </select>
+            </div>
+
+            <div class="form-row">
+              <label for="acc-csv-file">Import manual baseline CSV</label>
+              <input id="acc-csv-file" type="file" accept=".csv" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <label for="acc-keywords">Keyword list (one keyword per line; supports duplicate keywords)</label>
+            <textarea
+              id="acc-keywords"
+              rows="4"
+              placeholder="seo agency sydney&#10;local seo sydney"
+            ></textarea>
+          </div>
+
+          <div id="acc-feedback" class="feedback-banner hidden" role="alert"></div>
+
+          <div class="button-bar">
+            <button id="btn-acc-sync-keywords" class="btn-outline" type="button">Sync Keywords to Baseline Table</button>
+            <button id="btn-acc-compare" class="btn-navy" type="button">Run Accuracy Comparison</button>
+            <button id="btn-acc-export-csv" class="btn-outline" type="button">Export Report (CSV)</button>
+            <button id="btn-acc-export-json" class="btn-outline" type="button">Export JSON</button>
+            <button id="btn-acc-clear" class="btn-outline btn-reset" type="button">Clear Comparison Data</button>
+          </div>
+        </div>
+
+        <div class="status-panel">
+          <h3>Editable GS Location Changer Baseline</h3>
+          <p class="muted">
+            Columns: Keyword, Manual Ranking (number or NA), Manual Ranking URL, Target Location, Latitude, Longitude, Device, Checked At.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Keyword</th>
+                  <th>Manual Ranking</th>
+                  <th>Manual Ranking URL</th>
+                  <th>Device</th>
+                  <th>Checked At</th>
+                </tr>
+              </thead>
+              <tbody id="acc-baseline-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="acc-report-panel" class="status-panel hidden">
+          <h3>Accuracy Metrics &amp; Comparison Results</h3>
+          <div class="metrics-grid">
+            <div class="summary-chip">
+              <span class="summary-label">Total Tested</span>
+              <span id="met-total" class="summary-val">0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Comparable Keywords</span>
+              <span id="met-comparable" class="summary-val">0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Exact Match %</span>
+              <span id="met-exact-pct" class="summary-val">0%</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Within Tolerance %</span>
+              <span id="met-tol-pct" class="summary-val">0%</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">URL Match %</span>
+              <span id="met-url-pct" class="summary-val">0%</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Avg Abs Diff</span>
+              <span id="met-avg-diff" class="summary-val">-</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Location Mismatches</span>
+              <span id="met-loc-mismatch" class="summary-val">0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Blocked Searches</span>
+              <span id="met-blocked" class="summary-val">0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Incomplete Searches</span>
+              <span id="met-incomplete" class="summary-val">0</span>
+            </div>
+          </div>
+
+          <p class="limitation-note">
+            Proposed benchmark targets for manual validation (at least 20 representative keywords): &ge;90% within 1 ranking position, &ge;90% URL agreement, 0 unreported location mismatches, 0 blocked searches recorded as NA. Proposed targets only — not achieved results.
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Keyword</th>
+                  <th>Manual</th>
+                  <th>Extension</th>
+                  <th>Diff</th>
+                  <th>Manual URL</th>
+                  <th>Extension URL</th>
+                  <th>URL Match</th>
+                  <th>GPS</th>
+                  <th>Google Loc</th>
+                  <th>Source</th>
+                  <th>Comparison Status</th>
+                </tr>
+              </thead>
+              <tbody id="acc-comparison-tbody"></tbody>
             </table>
           </div>
         </div>
@@ -434,11 +609,16 @@
               <tr>
                 <td>Phase 4</td>
                 <td>Single keyword organic ranking detection</td>
+                <td><span class="pill pill-healthy">Completed</span></td>
+              </tr>
+              <tr>
+                <td>Phase 5</td>
+                <td>GS Location comparison &amp; accuracy validation lab</td>
                 <td><span class="pill pill-healthy">Current</span></td>
               </tr>
               <tr>
-                <td>Phases 5–12</td>
-                <td>GS Location comparison, bulk jobs, clients, Google Sheets, scheduling &amp; deployment</td>
+                <td>Phases 6–12</td>
+                <td>Bulk jobs, clients, Google Sheets, scheduling &amp; deployment</td>
                 <td><span class="pill pill-neutral">Pending</span></td>
               </tr>
             </tbody>
