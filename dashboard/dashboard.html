@@ -18,12 +18,146 @@
         </div>
         <div class="meta-badges">
           <span class="version-chip">v<span id="dash-version">-</span></span>
-          <span id="dash-phase-chip" class="phase-chip">Phase 1: Foundation</span>
+          <span id="dash-phase-chip" class="phase-chip">Phase 2: Geolocation Simulation</span>
         </div>
       </div>
     </header>
 
     <main class="container">
+      <section class="card location-card">
+        <div class="card-header">
+          <div>
+            <h2>Location Settings</h2>
+            <p class="muted">
+              Simulate browser GPS on a dedicated Chrome tab using Chrome Debugger API. Paste
+              <code>-33.8688, 151.2093</code> into Latitude to auto-split coordinates.
+            </p>
+          </div>
+          <span id="loc-state-pill" class="pill pill-neutral">Not configured</span>
+        </div>
+
+        <form id="location-form" class="location-form" novalidate>
+          <div class="form-row full-width">
+            <label for="loc-name">Location name</label>
+            <input id="loc-name" type="text" placeholder="e.g. Sydney CBD" autocomplete="off" />
+          </div>
+
+          <div class="form-grid-2">
+            <div class="form-row">
+              <label for="loc-lat">Latitude</label>
+              <input
+                id="loc-lat"
+                type="text"
+                inputmode="decimal"
+                placeholder="-33.8688 (or paste -33.8688, 151.2093)"
+                autocomplete="off"
+              />
+            </div>
+
+            <div class="form-row">
+              <label for="loc-lng">Longitude</label>
+              <input
+                id="loc-lng"
+                type="text"
+                inputmode="decimal"
+                placeholder="151.2093"
+                autocomplete="off"
+              />
+            </div>
+          </div>
+
+          <div class="form-grid-3">
+            <div class="form-row">
+              <label for="loc-accuracy">Accuracy (metres)</label>
+              <input id="loc-accuracy" type="number" min="1" step="any" value="20" />
+            </div>
+
+            <div class="form-row">
+              <label for="loc-country">Country</label>
+              <select id="loc-country">
+                <option value="Australia">Australia</option>
+                <option value="United Kingdom">United Kingdom</option>
+                <option value="United States">United States</option>
+                <option value="India">India</option>
+                <option value="Canada">Canada</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            <div class="form-row">
+              <label for="loc-language">Language</label>
+              <select id="loc-language">
+                <option value="en-AU">en-AU (English - Australia)</option>
+                <option value="en-GB">en-GB (English - UK)</option>
+                <option value="en-US">en-US (English - US)</option>
+                <option value="en-IN">en-IN (English - India)</option>
+                <option value="en-CA">en-CA (English - Canada)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row full-width">
+            <label for="loc-test-url">Controlled Test Page URL (no automated Google search in Phase 2)</label>
+            <input
+              id="loc-test-url"
+              type="url"
+              value="https://example.com/"
+              placeholder="https://example.com/"
+            />
+          </div>
+
+          <div id="loc-feedback" class="feedback-banner hidden" role="alert"></div>
+
+          <div class="button-bar">
+            <button id="btn-apply-location" class="btn-navy" type="submit">Apply Location</button>
+            <button id="btn-test-location" class="btn-outline" type="button">Test Location</button>
+            <button id="btn-open-test-tab" class="btn-outline" type="button">Open Test Tab</button>
+            <button id="btn-reset-location" class="btn-outline btn-reset" type="button">Reset Location</button>
+          </div>
+        </form>
+
+        <div class="status-panel">
+          <h3>Location verification panel</h3>
+          <div class="kv-list">
+            <div class="kv-row">
+              <span class="kv-label">Configured coordinates</span>
+              <span id="status-configured-coords" class="kv-value">Not configured</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Actual reported browser coordinates</span>
+              <span id="status-reported-coords" class="kv-value">Not tested</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Reported accuracy</span>
+              <span id="status-reported-accuracy" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Active browser tab ID</span>
+              <span id="status-tab-id" class="kv-value">None</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Debugger connection status</span>
+              <span id="status-debugger" class="kv-value">Not connected</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Location permission status</span>
+              <span id="status-permission" class="kv-value">unknown</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Last verification time</span>
+              <span id="status-last-verified" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Google search location verification</span>
+              <span id="status-google-location" class="kv-value">Unverified</span>
+            </div>
+          </div>
+          <p class="limitation-note">
+            Note: Browser GPS verification confirms <code>navigator.geolocation</code> in the dedicated test tab only. It does not change your public IP address or prove that Google Search uses these coordinates (Google Search location verification will be added in Phase 3).
+          </p>
+        </div>
+      </section>
+
       <section class="grid">
         <article class="card">
           <div class="card-header">
@@ -56,14 +190,14 @@
 
         <article class="card">
           <div class="card-header">
-            <h2>Phase 1 Scope &amp; Guardrails</h2>
+            <h2>Phase 2 Scope &amp; Guardrails</h2>
             <span class="pill pill-healthy">Active</span>
           </div>
           <ul class="checklist">
-            <li>Manifest V3 core with minimum permissions (<code>storage</code>, <code>tabs</code>).</li>
-            <li>Popup &harr; Background service worker messaging verified.</li>
-            <li><code>SHEET_REQUIREMENTS.md</code> preserved for Phase 8 &amp; Phase 9.</li>
-            <li>No live Google searches, location overrides, or Sheet writes enabled yet.</li>
+            <li>Permissions scoped strictly to <code>storage</code>, <code>tabs</code>, and <code>debugger</code>.</li>
+            <li>Overrides apply only to the dedicated test tab via <code>Emulation.setGeolocationOverride</code>.</li>
+            <li>Session state revalidates live tabs and debugger targets on reload.</li>
+            <li>No automated Google searches, ranking checks, or Sheet edits yet.</li>
           </ul>
         </article>
       </section>
@@ -86,12 +220,12 @@
               <tr>
                 <td>Phase 1</td>
                 <td>Clean previous Python project &amp; initialize Chrome extension</td>
-                <td><span class="pill pill-healthy">Current</span></td>
+                <td><span class="pill pill-healthy">Completed</span></td>
               </tr>
               <tr>
                 <td>Phase 2</td>
                 <td>Browser geolocation simulation (Chrome Debugger API)</td>
-                <td><span class="pill pill-neutral">Pending</span></td>
+                <td><span class="pill pill-healthy">Current</span></td>
               </tr>
               <tr>
                 <td>Phase 3</td>
@@ -117,4 +251,3 @@
     <script type="module" src="dashboard.js"></script>
   </body>
 </html>
-

@@ -5,7 +5,8 @@
   "description": "Internal agency Chrome extension for location-accurate organic keyword ranking checks and design-preserving Google Sheets updates.",
   "permissions": [
     "storage",
-    "tabs"
+    "tabs",
+    "debugger"
   ],
   "background": {
     "service_worker": "background/service-worker.js",

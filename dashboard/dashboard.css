@@ -1,5 +1,6 @@
 :root {
   --navy: #0f2744;
+  --navy-hover: #173861;
   --blue: #2563eb;
   --blue-hover: #1d4ed8;
   --bg: #f4f6f9;
@@ -109,26 +110,187 @@ body {
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 20px;
 }
 
 .card-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .card h2 {
-  font-size: 16px;
+  font-size: 17px;
   color: var(--navy);
 }
 
 .muted {
   color: var(--muted);
   font-size: 13px;
+}
+
+.location-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.form-row label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.form-row input,
+.form-row select {
+  width: 100%;
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--text);
+  background: #ffffff;
+}
+
+.form-row input:focus,
+.form-row select:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.2);
+  border-color: var(--blue);
+}
+
+.button-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.btn-navy {
+  flex: 2 1 200px;
+  background: var(--navy);
+  color: #ffffff;
+  border: 1px solid var(--navy);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-navy:hover {
+  background: var(--navy-hover);
+}
+
+.btn-outline {
+  flex: 1 1 130px;
+  background: #ffffff;
+  color: var(--navy);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-outline:hover {
+  background: #f8fafc;
+}
+
+.btn-reset {
+  flex: 0 1 auto;
+}
+
+.feedback-banner {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.feedback-banner.hidden {
+  display: none;
+}
+
+.feedback-banner.error {
+  background: var(--red-bg);
+  color: var(--red-fg);
+}
+
+.feedback-banner.success {
+  background: var(--green-bg);
+  color: var(--green-fg);
+}
+
+.feedback-banner.warning {
+  background: var(--amber-bg);
+  color: var(--amber-fg);
+}
+
+.status-panel {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.status-panel h3 {
+  font-size: 15px;
+  color: var(--navy);
+  margin-bottom: 10px;
+}
+
+.kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 4px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.kv-label {
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.kv-value {
+  color: var(--muted);
+  font-weight: 500;
+  text-align: right;
+  word-break: break-word;
+}
+
+.limitation-note {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .card-actions {
@@ -148,6 +310,11 @@ body {
 
 .btn-primary:hover {
   background: var(--blue-hover);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .details-list {
@@ -181,7 +348,7 @@ body {
 .pill {
   font-size: 12px;
   font-weight: 600;
-  padding: 3px 9px;
+  padding: 3px 10px;
   border-radius: 999px;
   white-space: nowrap;
 }
@@ -228,4 +395,3 @@ th {
   letter-spacing: 0.03em;
   color: var(--muted);
 }
-
