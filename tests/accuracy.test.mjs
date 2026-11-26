@@ -350,8 +350,10 @@ test("accuracy comparator classifies all statuses and excludes failures from acc
   // Only 4 rows are valid & comparable (exact, tol, mismatch, url)
   assert.equal(report.metrics.totalKeywordsTested, 9);
   assert.equal(report.metrics.comparableKeywords, 4);
-  assert.equal(report.metrics.exactMatchPercentage, 25); // 1/4
-  assert.equal(report.metrics.withinTolerancePercentage, 50); // (1 + 1)/4
+  assert.equal(report.metrics.coveragePercentage, 44.44);
+  // Ranking accuracy is independent of URL match (kw exact + kw url both have diff === 0)
+  assert.equal(report.metrics.exactMatchPercentage, 50); // 2/4
+  assert.equal(report.metrics.withinTolerancePercentage, 75); // (2 + 1)/4
   assert.equal(report.metrics.urlMatchPercentage, 75); // 3/4
   assert.equal(report.metrics.averageAbsoluteDifference, 2.25); // (0 + 1 + 8 + 0)/4
   assert.equal(report.metrics.blockedSearchCount, 1);

@@ -82,6 +82,14 @@ export function calculateOrganicRanking({
     }
   }
 
+  const lastPage = pageList.length > 0 ? pageList[pageList.length - 1] : null;
+  const genuineEndReached = Boolean(
+    lastPage &&
+      lastPage.endOfResultsVerified === true &&
+      !lastPage.nextPageUrl &&
+      !lastPage.incompleteReason
+  );
+
   const matched = flattened.find((entry) => entry.isTargetMatch) || null;
   if (matched) {
     return {
@@ -90,20 +98,13 @@ export function calculateOrganicRanking({
       rankingUrl: matched.url,
       checkedResults: flattened.length,
       requestedDepth: depth,
-      verifiedEndOfResults: true,
+      verifiedEndOfResults: genuineEndReached,
       resultsTable: flattened,
       errorDetails: null,
     };
   }
 
-  const lastPage = pageList.length > 0 ? pageList[pageList.length - 1] : null;
   const reachedRequestedDepth = flattened.length >= depth;
-  const genuineEndReached = Boolean(
-    lastPage &&
-      lastPage.endOfResultsVerified === true &&
-      !lastPage.nextPageUrl &&
-      !lastPage.incompleteReason
-  );
 
   // Never report NA ("Not found within verified search depth") unless the requested
   // depth was checked OR a genuine end of Google results was verified.

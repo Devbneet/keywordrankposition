@@ -16,9 +16,9 @@
             <p class="subtitle">Manifest V3 Chrome Extension — Agency Workspace</p>
           </div>
         </div>
-        <div class="meta-badges">
+          <div class="meta-badges">
           <span class="version-chip">v<span id="dash-version">-</span></span>
-          <span id="dash-phase-chip" class="phase-chip">Phase 5: Ranking Accuracy Lab</span>
+          <span id="dash-phase-chip" class="phase-chip">Phase 6: Bulk Keyword Checker</span>
         </div>
       </div>
     </header>
@@ -532,6 +532,172 @@
         </div>
       </section>
 
+      <section class="card bulk-card">
+        <div class="card-header">
+          <div>
+            <h2>Bulk Keyword Checker (Phase 6)</h2>
+            <p class="muted">
+              Process multiple keywords sequentially using the verified location session and Single Keyword Checker.
+              Duplicates and row order are preserved; blocked searches stop immediately without fabricating NA.
+            </p>
+          </div>
+          <span id="bulk-job-pill" class="pill pill-neutral">Ready</span>
+        </div>
+
+        <div class="context-summary-grid">
+          <div class="summary-chip">
+            <span class="summary-label">Client Domain</span>
+            <span id="bulk-ctx-domain" class="summary-val">-</span>
+          </div>
+          <div class="summary-chip">
+            <span class="summary-label">Location &amp; Coordinates</span>
+            <span id="bulk-ctx-location" class="summary-val">Not configured</span>
+          </div>
+          <div class="summary-chip">
+            <span class="summary-label">Country / Language</span>
+            <span id="bulk-ctx-locale" class="summary-val">-</span>
+          </div>
+          <div class="summary-chip">
+            <span class="summary-label">Device / Depth</span>
+            <span id="bulk-ctx-mode" class="summary-val">Desktop · Depth 50</span>
+          </div>
+        </div>
+
+        <div class="location-form">
+          <div class="form-grid-3">
+            <div class="form-row">
+              <label for="bulk-device">Device type (supported modes)</label>
+              <select id="bulk-device">
+                <option value="Desktop" selected>Desktop (Verified &amp; Supported)</option>
+              </select>
+            </div>
+
+            <div class="form-row">
+              <label for="bulk-csv-file">Upload CSV keyword list</label>
+              <input id="bulk-csv-file" type="file" accept=".csv" />
+            </div>
+
+            <div class="form-row">
+              <label for="bulk-txt-file">Upload TXT keyword list</label>
+              <input id="bulk-txt-file" type="file" accept=".txt" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="action-group-header">
+              <label for="bulk-keywords">Keywords (one per line; duplicate rows preserved)</label>
+              <button id="btn-bulk-import-lab" class="btn-link" type="button">
+                Import from Accuracy Lab
+              </button>
+            </div>
+            <textarea
+              id="bulk-keywords"
+              rows="5"
+              placeholder="seo agency sydney&#10;local seo sydney&#10;digital marketing agency"
+            ></textarea>
+          </div>
+
+          <div id="bulk-feedback" class="feedback-banner hidden" role="alert"></div>
+
+          <div class="button-bar">
+            <button id="btn-bulk-start" class="btn-navy" type="button">Start Ranking Check</button>
+            <button id="btn-bulk-pause" class="btn-outline" type="button" disabled>Pause</button>
+            <button id="btn-bulk-resume" class="btn-outline" type="button" disabled>Resume</button>
+            <button id="btn-bulk-stop" class="btn-outline" type="button" disabled>Stop</button>
+            <button id="btn-bulk-retry" class="btn-outline" type="button" disabled>Retry Failed Keywords</button>
+            <button id="btn-bulk-export" class="btn-outline" type="button" disabled>Export Results</button>
+            <button id="btn-bulk-clear" class="btn-outline btn-reset" type="button">Clear Results</button>
+          </div>
+        </div>
+
+        <div id="bulk-progress-panel" class="status-panel">
+          <h3>Job Progress</h3>
+          <div class="metrics-grid">
+            <div class="summary-chip">
+              <span class="summary-label">Total Keywords</span>
+              <span id="bulk-m-total" class="summary-val">0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Completed</span>
+              <span id="bulk-m-completed" class="summary-val">0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Pending</span>
+              <span id="bulk-m-pending" class="summary-val">0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Ranked</span>
+              <span id="bulk-m-ranked" class="summary-val">0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Not Found (NA)</span>
+              <span id="bulk-m-na" class="summary-val">0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Failed / Blocked</span>
+              <span id="bulk-m-failed" class="summary-val">0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Current Keyword</span>
+              <span id="bulk-m-current" class="summary-val">-</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Elapsed / ETA</span>
+              <span id="bulk-m-time" class="summary-val">0s / -</span>
+            </div>
+          </div>
+
+          <div class="progress-wrap">
+            <div class="progress-header">
+              <span id="bulk-progress-label" class="muted">Idle</span>
+              <span id="bulk-progress-pct" class="summary-val">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="bulk-progress-fill" class="progress-fill" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div class="filter-bar">
+            <input
+              id="bulk-search-input"
+              type="text"
+              placeholder="Search keyword, URL, or error..."
+              autocomplete="off"
+            />
+            <select id="bulk-filter-select">
+              <option value="all">All results</option>
+              <option value="top3">Top 3</option>
+              <option value="top10">Top 10</option>
+              <option value="top20">Top 20</option>
+              <option value="ranked">Ranked</option>
+              <option value="not_found">Not found</option>
+              <option value="failed">Failed</option>
+              <option value="pending">Pending</option>
+            </select>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Keyword</th>
+                  <th>Position</th>
+                  <th>Ranking URL</th>
+                  <th>Results Checked</th>
+                  <th>Google-Detected Location</th>
+                  <th>Location Status</th>
+                  <th>Result Status</th>
+                  <th>Checked Date &amp; Time</th>
+                  <th>Error Details</th>
+                </tr>
+              </thead>
+              <tbody id="bulk-results-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <section class="grid">
         <article class="card">
           <div class="card-header">
@@ -614,11 +780,16 @@
               <tr>
                 <td>Phase 5</td>
                 <td>GS Location comparison &amp; accuracy validation lab</td>
+                <td><span class="pill pill-healthy">Completed</span></td>
+              </tr>
+              <tr>
+                <td>Phase 6</td>
+                <td>Bulk keyword checking &amp; job management</td>
                 <td><span class="pill pill-healthy">Current</span></td>
               </tr>
               <tr>
-                <td>Phases 6–12</td>
-                <td>Bulk jobs, clients, Google Sheets, scheduling &amp; deployment</td>
+                <td>Phases 7–12</td>
+                <td>Clients, Google Sheets, scheduling &amp; deployment</td>
                 <td><span class="pill pill-neutral">Pending</span></td>
               </tr>
             </tbody>

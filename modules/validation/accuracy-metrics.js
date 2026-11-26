@@ -42,7 +42,7 @@ export function computeAccuracyMetrics({ rows = [], tolerance = 1 } = {}) {
       else if (row.comparisonStatus === COMPARISON_STATUSES.URL_MISMATCH) urlMismatches += 1;
 
       if (typeof row.rankingDifference === "number" && Number.isFinite(row.rankingDifference)) {
-        numericDiffs.push(row.rankingDifference);
+        numericDiffs.push(Math.abs(row.rankingDifference));
       }
       if (row.urlMatchStatus === "Match" || row.urlMatchStatus === "Matched (NA)" || row.urlMatchStatus === "Mismatch") {
         urlComparableRows.push(row);
@@ -61,7 +61,9 @@ export function computeAccuracyMetrics({ rows = [], tolerance = 1 } = {}) {
   }
 
   const comparableKeywords = comparableRows.length;
-  const withinToleranceTotal = exactMatches + withinToleranceOnly;
+  // Ranking accuracy is calculated independently from URL match (diff === 0 includes URL_MISMATCH rows).
+  const exactRankingMatches = exactMatches + urlMismatches;
+  const withinToleranceTotal = exactRankingMatches + withinToleranceOnly;
   const urlMatchedCount = urlComparableRows.filter(
     (r) => r.urlMatchStatus === "Match" || r.urlMatchStatus === "Matched (NA)"
   ).length;
@@ -74,13 +76,15 @@ export function computeAccuracyMetrics({ rows = [], tolerance = 1 } = {}) {
   return {
     totalKeywordsTested: rows.length,
     comparableKeywords,
+    coveragePercentage: roundPct(comparableKeywords, rows.length),
     tolerance,
-    exactMatches,
+    exactMatches: exactRankingMatches,
+    exactWithUrlMatches: exactMatches,
     withinToleranceOnly,
     withinToleranceTotal,
     rankingMismatches,
     urlMismatches,
-    exactMatchPercentage: roundPct(exactMatches, comparableKeywords),
+    exactMatchPercentage: roundPct(exactRankingMatches, comparableKeywords),
     withinTolerancePercentage: roundPct(withinToleranceTotal, comparableKeywords),
     urlMatchPercentage: roundPct(urlMatchedCount, urlComparableRows.length),
     averageAbsoluteDifference,

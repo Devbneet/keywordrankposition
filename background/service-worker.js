@@ -1,8 +1,42 @@
+import { createJobManager } from "../modules/jobs/job-manager.js";
+import { createJobStorage } from "../modules/jobs/job-storage.js";
 import { createGeolocationController } from "../modules/location/geolocation-controller.js";
 import { createSingleKeywordChecker } from "../modules/ranking/single-keyword-checker.js";
 import { createStorageClient, STORAGE_KEYS } from "../modules/storage/storage.js";
 import { buildHealthReport } from "../utils/health.js";
 import { MESSAGE_TYPES } from "../utils/messages.js";
+
+// Keep per-storage-instance job manager so Pause/Stop reach the active runner.
+const jobManagerCache = new WeakMap();
+
+function getOrCreateServices(chromeApi) {
+  const storageArea = chromeApi?.storage?.local;
+  const storage = createStorageClient(storageArea);
+  const locationController = createGeolocationController({
+    chromeApi,
+    storageClient: storage,
+  });
+  const rankingChecker = createSingleKeywordChecker({
+    chromeApi,
+    storageClient: storage,
+    locationController,
+  });
+
+  let jobManager = storageArea ? jobManagerCache.get(storageArea) : null;
+  if (!jobManager) {
+    const jobStorage = createJobStorage({ storageClient: storage });
+    jobManager = createJobManager({
+      jobStorage,
+      locationController,
+      singleKeywordChecker: rankingChecker,
+    });
+    if (storageArea) {
+      jobManagerCache.set(storageArea, jobManager);
+    }
+  }
+
+  return { storage, locationController, rankingChecker, jobManager };
+}
 
 /**
  * Handle runtime messages from popup and dashboard pages.
@@ -14,16 +48,8 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
   }
 
   const version = chromeApi?.runtime?.getManifest?.().version || "0.1.0";
-  const storage = createStorageClient(chromeApi?.storage?.local);
-  const locationController = createGeolocationController({
-    chromeApi,
-    storageClient: storage,
-  });
-  const rankingChecker = createSingleKeywordChecker({
-    chromeApi,
-    storageClient: storage,
-    locationController,
-  });
+  const { storage, locationController, rankingChecker, jobManager } =
+    getOrCreateServices(chromeApi);
 
   switch (message.type) {
     case MESSAGE_TYPES.HEALTH_CHECK: {
@@ -32,7 +58,7 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
         version,
         storageOk: ping.ok,
         checkedAt: ping.checkedAt,
-        notes: ["Phase 4 core ready (location verification + single keyword organic ranking)."],
+        notes: ["Phase 6 core ready (location, single ranking, accuracy lab, and bulk job queue)."],
       });
     }
 
@@ -107,6 +133,34 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
     case MESSAGE_TYPES.RANKING_GET_STATE: {
       const state = await rankingChecker.getState();
       return { ok: true, state };
+    }
+
+    case MESSAGE_TYPES.BULK_GET_STATUS: {
+      return jobManager.getStatus();
+    }
+
+    case MESSAGE_TYPES.BULK_START: {
+      return jobManager.startJob(message.payload || {});
+    }
+
+    case MESSAGE_TYPES.BULK_PAUSE: {
+      return jobManager.pauseJob();
+    }
+
+    case MESSAGE_TYPES.BULK_RESUME: {
+      return jobManager.resumeJob();
+    }
+
+    case MESSAGE_TYPES.BULK_STOP: {
+      return jobManager.stopJob();
+    }
+
+    case MESSAGE_TYPES.BULK_RETRY_FAILED: {
+      return jobManager.retryFailedKeywords();
+    }
+
+    case MESSAGE_TYPES.BULK_CLEAR: {
+      return jobManager.clearResults();
     }
 
     default:

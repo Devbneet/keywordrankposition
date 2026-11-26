@@ -69,6 +69,12 @@ function buildResultRecord({
   startedAtMs,
 }) {
   const isManual = sourceMode === "manual_html";
+  const isVerifiedOutcome =
+    !isManual &&
+    (status === RANKING_STATUSES.RANKED || status === RANKING_STATUSES.NOT_FOUND) &&
+    locationState?.browserGpsStatus === LOCATION_STATES.GPS_VERIFIED &&
+    locationState?.googleLocationStatus === GOOGLE_LOCATION_STATUSES.MATCHED;
+
   return {
     keyword: String(keyword || "").trim(),
     targetWebsite: String(targetWebsite || "").trim(),
@@ -78,8 +84,12 @@ function buildResultRecord({
     requestedDepth,
     verifiedEndOfResults,
     sourceMode,
-    isLiveVerified: !isManual && status !== RANKING_STATUSES.LOCATION_UNVERIFIED && status !== RANKING_STATUSES.LOCATION_MISMATCH,
-    sourceLabel: isManual ? "Manual SERP HTML (Not Live Verified)" : "Live Google Search (Authorized)",
+    isLiveVerified: isVerifiedOutcome,
+    sourceLabel: isManual
+      ? "Manual SERP HTML (Not Live Verified)"
+      : isVerifiedOutcome
+        ? "Live Google Search (Verified)"
+        : "Live Google Search (Unverified / Incomplete)",
     deviceType,
     configSnapshot: locationState?.config ? { ...locationState.config } : null,
     browserGpsStatus: isManual
@@ -405,8 +415,10 @@ export function createSingleKeywordChecker({
           await waitForTabComplete({ tabId, chromeApi });
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
-          const status =
-            parsedPages.length > 0
+          const tabClosed = /no tab|was closed|target closed/i.test(msg);
+          const status = tabClosed
+            ? RANKING_STATUSES.LOCATION_UNVERIFIED
+            : parsedPages.length > 0
               ? RANKING_STATUSES.INCOMPLETE_SEARCH
               : RANKING_STATUSES.NETWORK_ERROR;
           const partialCalc =
@@ -574,6 +586,14 @@ export function createSingleKeywordChecker({
             googleLocationSourceType: googleFooterCheck.locationSourceType,
             googleMatchType: googleFooterCheck.matchType,
           };
+        }
+        if (locationController?.recordLiveCheckVerification) {
+          await locationController.recordLiveCheckVerification({
+            tabId,
+            pageUrl: pageHref,
+            gpsCheck: midGpsCheck,
+            googleFooterCheck,
+          });
         }
 
         parsedPages.push({ ...parsed, pageNumber });

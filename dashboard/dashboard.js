@@ -1,4 +1,10 @@
 import {
+  importKeywordsFromBaselineRows,
+  parseKeywordCsvInput,
+  parseKeywordTextInput,
+} from "../modules/jobs/keyword-queue.js";
+import { isActiveJobState, isFailedTaskStatus, JOB_STATES, TASK_STATUSES } from "../modules/jobs/job-state.js";
+import {
   getCountryPreset,
   parseCoordinatePair,
 } from "../modules/location/coordinate-validator.js";
@@ -6,6 +12,11 @@ import {
   GOOGLE_LOCATION_STATUSES,
   LOCATION_STATES,
 } from "../modules/location/location-state.js";
+import {
+  computeBulkProgressMetrics,
+  exportBulkResultsCsv,
+  filterBulkTasks,
+} from "../modules/ranking/bulk-results.js";
 import { RANKING_STATUSES } from "../modules/ranking/ranking-state.js";
 import { createStorageClient } from "../modules/storage/storage.js";
 import { compareRankingWithBaseline } from "../modules/validation/accuracy-comparator.js";
@@ -135,8 +146,48 @@ const metLocMismatchEl = document.getElementById("met-loc-mismatch");
 const metBlockedEl = document.getElementById("met-blocked");
 const metIncompleteEl = document.getElementById("met-incomplete");
 
+// Bulk Keyword Checker controls (Phase 6)
+const bulkJobPillEl = document.getElementById("bulk-job-pill");
+const bulkCtxDomainEl = document.getElementById("bulk-ctx-domain");
+const bulkCtxLocationEl = document.getElementById("bulk-ctx-location");
+const bulkCtxLocaleEl = document.getElementById("bulk-ctx-locale");
+const bulkCtxModeEl = document.getElementById("bulk-ctx-mode");
+const bulkDeviceSelect = document.getElementById("bulk-device");
+const bulkCsvFileInput = document.getElementById("bulk-csv-file");
+const bulkTxtFileInput = document.getElementById("bulk-txt-file");
+const bulkImportLabBtn = document.getElementById("btn-bulk-import-lab");
+const bulkKeywordsInput = document.getElementById("bulk-keywords");
+const bulkFeedbackEl = document.getElementById("bulk-feedback");
+
+const bulkStartBtn = document.getElementById("btn-bulk-start");
+const bulkPauseBtn = document.getElementById("btn-bulk-pause");
+const bulkResumeBtn = document.getElementById("btn-bulk-resume");
+const bulkStopBtn = document.getElementById("btn-bulk-stop");
+const bulkRetryBtn = document.getElementById("btn-bulk-retry");
+const bulkExportBtn = document.getElementById("btn-bulk-export");
+const bulkClearBtn = document.getElementById("btn-bulk-clear");
+
+const bulkMTotalEl = document.getElementById("bulk-m-total");
+const bulkMCompletedEl = document.getElementById("bulk-m-completed");
+const bulkMPendingEl = document.getElementById("bulk-m-pending");
+const bulkMRankedEl = document.getElementById("bulk-m-ranked");
+const bulkMNaEl = document.getElementById("bulk-m-na");
+const bulkMFailedEl = document.getElementById("bulk-m-failed");
+const bulkMCurrentEl = document.getElementById("bulk-m-current");
+const bulkMTimeEl = document.getElementById("bulk-m-time");
+const bulkProgressLabelEl = document.getElementById("bulk-progress-label");
+const bulkProgressPctEl = document.getElementById("bulk-progress-pct");
+const bulkProgressFillEl = document.getElementById("bulk-progress-fill");
+
+const bulkSearchInput = document.getElementById("bulk-search-input");
+const bulkFilterSelect = document.getElementById("bulk-filter-select");
+const bulkResultsTbody = document.getElementById("bulk-results-tbody");
+
 let latestLocationState = null;
 let latestRankingState = null;
+let latestBulkState = { job: null, tasks: [], isBusy: false };
+let bulkPollTimer = null;
+let parsedBulkQueueInput = null;
 let validationState = {
   tolerance: 1,
   deviceType: "Desktop",
@@ -215,6 +266,9 @@ function getLocationPayload() {
 
 function renderSharedContextSummaries() {
   const cfg = latestLocationState?.config;
+  const domainVal = rankDomainInput.value.trim() || "-";
+  const depthVal = rankDepthSelect.value;
+
   if (cfg) {
     const locTitle = [cfg.locationName, cfg.targetCity].filter(Boolean).join(" / ") || "Configured";
     rankCtxLocationEl.textContent = locTitle;
@@ -222,16 +276,22 @@ function renderSharedContextSummaries() {
     rankCtxLocaleEl.textContent = `${cfg.country} (${cfg.language})`;
     accCtxLocationEl.textContent = `${locTitle} (${cfg.latitude}, ${cfg.longitude})`;
     accCtxLocaleEl.textContent = `${cfg.country} (${cfg.language})`;
+    bulkCtxLocationEl.textContent = `${locTitle} (${cfg.latitude}, ${cfg.longitude})`;
+    bulkCtxLocaleEl.textContent = `${cfg.country} (${cfg.language})`;
   } else {
     rankCtxLocationEl.textContent = "Not configured";
     rankCtxCoordsEl.textContent = "-";
     rankCtxLocaleEl.textContent = `${locCountrySelect.value} (${locLanguageSelect.value})`;
     accCtxLocationEl.textContent = "Not configured";
     accCtxLocaleEl.textContent = `${locCountrySelect.value} (${locLanguageSelect.value})`;
+    bulkCtxLocationEl.textContent = "Not configured";
+    bulkCtxLocaleEl.textContent = `${locCountrySelect.value} (${locLanguageSelect.value})`;
   }
 
-  accCtxDomainEl.textContent = rankDomainInput.value.trim() || "-";
-  accCtxDepthEl.textContent = rankDepthSelect.value;
+  accCtxDomainEl.textContent = domainVal;
+  accCtxDepthEl.textContent = depthVal;
+  bulkCtxDomainEl.textContent = domainVal;
+  bulkCtxModeEl.textContent = `${bulkDeviceSelect.value} · Depth ${depthVal}`;
 
   if (latestLocationState?.googleDetectedLocation) {
     rankCtxGoogleEl.textContent = `${latestLocationState.googleDetectedLocation} (${latestLocationState.googleLocationStatus})`;
@@ -337,9 +397,15 @@ function renderRankingResult(result) {
   setRankingPillStyle(result.status);
 
   const isManual = result.sourceMode === "manual_html";
-  resSourceBadgeEl.className = `pill ${isManual ? "pill-pending" : "pill-healthy"}`;
-  resSourceBadgeEl.textContent = isManual ? "Manual SERP HTML (Not Live Verified)" : "Live Google Search";
-  resSourceLabelEl.textContent = result.sourceLabel || (isManual ? "Manual SERP HTML" : "Live Google Search");
+  resSourceBadgeEl.className = `pill ${
+    isManual ? "pill-pending" : result.isLiveVerified ? "pill-healthy" : "pill-error"
+  }`;
+  resSourceBadgeEl.textContent = isManual
+    ? "Manual SERP HTML (Not Live Verified)"
+    : result.isLiveVerified
+      ? "Live Verified"
+      : "Unverified / Incomplete";
+  resSourceLabelEl.textContent = result.sourceLabel || "-";
 
   resStatusEl.textContent = result.invalidatedByLocationChange
     ? `${result.status} (Invalidated: ${result.invalidationReason || "Location changed"})`
@@ -468,7 +534,7 @@ function renderComparisonReport(report) {
   accReportPanel.classList.remove("hidden");
   const m = report.metrics;
   metTotalEl.textContent = String(m.totalKeywordsTested);
-  metComparableEl.textContent = String(m.comparableKeywords);
+  metComparableEl.textContent = `${m.comparableKeywords} (${m.coveragePercentage ?? 0}% coverage)`;
   metExactPctEl.textContent = `${m.exactMatchPercentage}%`;
   metTolPctEl.textContent = `${m.withinTolerancePercentage}%`;
   metUrlPctEl.textContent = `${m.urlMatchPercentage}%`;
@@ -511,6 +577,146 @@ function renderComparisonReport(report) {
       tr.appendChild(td);
     }
     accComparisonTbody.appendChild(tr);
+  }
+}
+
+function formatDurationMs(ms) {
+  if (ms === null || ms === undefined) return "-";
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  return `${mins}m ${secs}s`;
+}
+
+function renderBulkJobState(bulkState) {
+  latestBulkState = bulkState || { job: null, tasks: [], isBusy: false };
+  const { job, tasks } = latestBulkState;
+  const state = job?.state || JOB_STATES.READY;
+
+  bulkJobPillEl.className = "pill";
+  bulkJobPillEl.textContent = state;
+  if (state === JOB_STATES.COMPLETED) {
+    bulkJobPillEl.classList.add("pill-healthy");
+  } else if (
+    state === JOB_STATES.SEARCH_BLOCKED ||
+    state === JOB_STATES.LOCATION_VERIFICATION_FAILED
+  ) {
+    bulkJobPillEl.classList.add("pill-error");
+  } else if (
+    isActiveJobState(state) ||
+    state === JOB_STATES.PAUSED ||
+    state === JOB_STATES.COMPLETED_WITH_ERRORS ||
+    state === JOB_STATES.RECOVERY_REQUIRED ||
+    state === JOB_STATES.INTERRUPTED
+  ) {
+    bulkJobPillEl.classList.add("pill-pending");
+  } else {
+    bulkJobPillEl.classList.add("pill-neutral");
+  }
+
+  const metrics = computeBulkProgressMetrics(job, tasks);
+  bulkMTotalEl.textContent = String(metrics.totalKeywords);
+  bulkMCompletedEl.textContent = String(metrics.completedKeywords);
+  bulkMPendingEl.textContent = String(metrics.pendingKeywords);
+  bulkMRankedEl.textContent = String(metrics.rankedKeywords);
+  bulkMNaEl.textContent = String(metrics.notFoundKeywords);
+  bulkMFailedEl.textContent = String(metrics.failedKeywords);
+  bulkMCurrentEl.textContent = metrics.currentKeyword || "-";
+  bulkMTimeEl.textContent = `${formatDurationMs(metrics.elapsedMs)} / ${formatDurationMs(metrics.estimatedRemainingMs)}`;
+
+  bulkProgressLabelEl.textContent =
+    state === JOB_STATES.RUNNING && metrics.currentKeyword
+      ? `Processing: ${metrics.currentKeyword}`
+      : job?.interruptionReason || job?.lastError || state;
+  bulkProgressPctEl.textContent = `${metrics.progressPercentage}%`;
+  bulkProgressFillEl.style.width = `${metrics.progressPercentage}%`;
+
+  const running = isActiveJobState(state) || Boolean(latestBulkState.isBusy);
+  const hasPending = tasks.some((t) => t.status === TASK_STATUSES.PENDING);
+  const hasFailed = tasks.some((t) => isFailedTaskStatus(t.status));
+  const canResume =
+    !running &&
+    hasPending &&
+    (state === JOB_STATES.PAUSED ||
+      state === JOB_STATES.RECOVERY_REQUIRED ||
+      state === JOB_STATES.INTERRUPTED ||
+      state === JOB_STATES.LOCATION_VERIFICATION_FAILED ||
+      state === JOB_STATES.SEARCH_BLOCKED);
+
+  bulkStartBtn.disabled = running;
+  bulkPauseBtn.disabled = !running;
+  bulkResumeBtn.disabled = !canResume;
+  bulkStopBtn.disabled =
+    !running && state !== JOB_STATES.PAUSED && state !== JOB_STATES.RECOVERY_REQUIRED;
+  bulkRetryBtn.disabled = running || !hasFailed;
+  bulkExportBtn.disabled = tasks.length === 0;
+  bulkClearBtn.disabled = running;
+
+  renderBulkResultsTable(tasks);
+  syncBulkPolling(running);
+}
+
+function renderBulkResultsTable(tasks) {
+  bulkResultsTbody.textContent = "";
+  const filtered = filterBulkTasks(tasks || [], {
+    searchQuery: bulkSearchInput.value,
+    filterMode: bulkFilterSelect.value,
+  });
+
+  if (filtered.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 10;
+    td.textContent = tasks.length === 0
+      ? "No bulk job results yet. Import or paste keywords above and click Start Ranking Check."
+      : "No results match the current search/filter.";
+    tr.appendChild(td);
+    bulkResultsTbody.appendChild(tr);
+    return;
+  }
+
+  for (const task of filtered) {
+    const tr = document.createElement("tr");
+    if (task.status === TASK_STATUSES.RANKED) {
+      tr.classList.add("target-match-row");
+    }
+    const posText =
+      task.status === TASK_STATUSES.RANKED
+        ? `#${task.position}`
+        : task.status === TASK_STATUSES.NOT_FOUND
+          ? "NA"
+          : "-";
+
+    const cells = [
+      task.rowPosition,
+      task.keyword,
+      posText,
+      task.rankingUrl || "-",
+      task.checkedResults ?? 0,
+      task.googleDetectedLocation || "-",
+      task.locationVerificationStatus || "-",
+      task.status,
+      task.checkedAt ? new Date(task.checkedAt).toLocaleString() : "-",
+      task.errorDetails || "-",
+    ];
+    for (const val of cells) {
+      const td = document.createElement("td");
+      td.textContent = String(val);
+      tr.appendChild(td);
+    }
+    bulkResultsTbody.appendChild(tr);
+  }
+}
+
+function syncBulkPolling(shouldPoll) {
+  if (shouldPoll && !bulkPollTimer) {
+    bulkPollTimer = setInterval(() => {
+      refreshBulkStatus();
+    }, 1000);
+  } else if (!shouldPoll && bulkPollTimer) {
+    clearInterval(bulkPollTimer);
+    bulkPollTimer = null;
   }
 }
 
@@ -565,6 +771,7 @@ locCountrySelect.addEventListener("change", () => {
 
 rankDomainInput.addEventListener("input", renderSharedContextSummaries);
 rankDepthSelect.addEventListener("change", renderSharedContextSummaries);
+bulkDeviceSelect.addEventListener("change", renderSharedContextSummaries);
 
 rankUseManualHtmlChk.addEventListener("change", () => {
   if (rankUseManualHtmlChk.checked) {
@@ -699,6 +906,155 @@ accClearBtn.addEventListener("click", async () => {
   showBanner(accFeedbackEl, "success", "Cleared comparison baseline and report data.");
 });
 
+// Bulk Keyword Checker event handlers
+bulkKeywordsInput.addEventListener("input", () => {
+  parsedBulkQueueInput = null;
+});
+
+bulkCsvFileInput.addEventListener("change", async () => {
+  const file = bulkCsvFileInput.files?.[0];
+  if (!file) return;
+  const entries = parseKeywordCsvInput(await file.text());
+  if (entries.length === 0) {
+    showBanner(bulkFeedbackEl, "error", "No keywords found in CSV file.");
+    return;
+  }
+  parsedBulkQueueInput = entries;
+  bulkKeywordsInput.value = entries.map((e) => e.keyword).join("\n");
+  showBanner(bulkFeedbackEl, "success", `Loaded ${entries.length} keyword(s) from CSV.`);
+});
+
+bulkTxtFileInput.addEventListener("change", async () => {
+  const file = bulkTxtFileInput.files?.[0];
+  if (!file) return;
+  const entries = parseKeywordTextInput(await file.text());
+  if (entries.length === 0) {
+    showBanner(bulkFeedbackEl, "error", "No keywords found in TXT file.");
+    return;
+  }
+  parsedBulkQueueInput = entries;
+  bulkKeywordsInput.value = entries.map((e) => e.keyword).join("\n");
+  showBanner(bulkFeedbackEl, "success", `Loaded ${entries.length} keyword(s) from TXT.`);
+});
+
+bulkImportLabBtn.addEventListener("click", () => {
+  const entries = importKeywordsFromBaselineRows(validationState.baselineRows);
+  if (entries.length === 0) {
+    const labTextEntries = parseKeywordTextInput(accKeywordsInput.value);
+    if (labTextEntries.length === 0) {
+      showBanner(bulkFeedbackEl, "error", "No keywords available in Accuracy Lab to import.");
+      return;
+    }
+    parsedBulkQueueInput = labTextEntries;
+    bulkKeywordsInput.value = labTextEntries.map((e) => e.keyword).join("\n");
+    showBanner(bulkFeedbackEl, "success", `Imported ${labTextEntries.length} keyword(s) from Accuracy Lab.`);
+    return;
+  }
+  parsedBulkQueueInput = entries;
+  bulkKeywordsInput.value = entries.map((e) => e.keyword).join("\n");
+  showBanner(bulkFeedbackEl, "success", `Imported ${entries.length} keyword(s) from Accuracy Lab baseline.`);
+});
+
+bulkSearchInput.addEventListener("input", () => {
+  renderBulkResultsTable(latestBulkState.tasks);
+});
+
+bulkFilterSelect.addEventListener("change", () => {
+  renderBulkResultsTable(latestBulkState.tasks);
+});
+
+bulkStartBtn.addEventListener("click", async () => {
+  showBanner(bulkFeedbackEl, null, "");
+  const entries = parsedBulkQueueInput || parseKeywordTextInput(bulkKeywordsInput.value);
+  if (entries.length === 0) {
+    showBanner(bulkFeedbackEl, "error", "Enter or import at least one keyword first.");
+    return;
+  }
+
+  bulkStartBtn.disabled = true;
+  syncBulkPolling(true);
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: MESSAGE_TYPES.BULK_START,
+      payload: {
+        websiteDomain: rankDomainInput.value,
+        keywords: entries,
+        searchDepth: Number(rankDepthSelect.value),
+        deviceType: bulkDeviceSelect.value,
+      },
+    });
+    if (response?.job) {
+      renderBulkJobState({ job: response.job, tasks: response.tasks || [], isBusy: false });
+    }
+    if (!response?.ok) {
+      showBanner(bulkFeedbackEl, "error", response?.error || "Bulk job stopped with errors.");
+    } else {
+      showBanner(bulkFeedbackEl, "success", `Bulk job finished (${response.job?.state}).`);
+    }
+  } catch (error) {
+    showBanner(bulkFeedbackEl, "error", error instanceof Error ? error.message : "Bulk job failed.");
+  } finally {
+    await refreshBulkStatus();
+  }
+});
+
+bulkPauseBtn.addEventListener("click", async () => {
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.BULK_PAUSE });
+  showBanner(bulkFeedbackEl, "warning", res?.message || res?.error || "Pause requested.");
+});
+
+bulkResumeBtn.addEventListener("click", async () => {
+  showBanner(bulkFeedbackEl, null, "");
+  syncBulkPolling(true);
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.BULK_RESUME });
+  if (res?.job) {
+    renderBulkJobState({ job: res.job, tasks: res.tasks || [], isBusy: false });
+  }
+  if (!res?.ok) {
+    showBanner(bulkFeedbackEl, "error", res?.error || "Unable to resume bulk job.");
+  }
+  await refreshBulkStatus();
+});
+
+bulkStopBtn.addEventListener("click", async () => {
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.BULK_STOP });
+  showBanner(bulkFeedbackEl, "warning", res?.message || "Bulk job stopped.");
+  await refreshBulkStatus();
+});
+
+bulkRetryBtn.addEventListener("click", async () => {
+  showBanner(bulkFeedbackEl, null, "");
+  syncBulkPolling(true);
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.BULK_RETRY_FAILED });
+  if (res?.job) {
+    renderBulkJobState({ job: res.job, tasks: res.tasks || [], isBusy: false });
+  }
+  if (!res?.ok) {
+    showBanner(bulkFeedbackEl, "error", res?.error || "Retry failed.");
+  }
+  await refreshBulkStatus();
+});
+
+bulkExportBtn.addEventListener("click", () => {
+  if (!latestBulkState.tasks || latestBulkState.tasks.length === 0) {
+    showBanner(bulkFeedbackEl, "error", "No bulk results available to export.");
+    return;
+  }
+  const csv = exportBulkResultsCsv(latestBulkState.job, latestBulkState.tasks);
+  downloadTextFile("bulk-keyword-rankings.csv", csv, "text/csv;charset=utf-8");
+});
+
+bulkClearBtn.addEventListener("click", async () => {
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.BULK_CLEAR });
+  if (!res?.ok) {
+    showBanner(bulkFeedbackEl, "error", res?.error || "Failed clearing bulk results.");
+    return;
+  }
+  parsedBulkQueueInput = null;
+  renderBulkJobState({ job: null, tasks: [], isBusy: false });
+  showBanner(bulkFeedbackEl, "success", "Cleared bulk ranking results.");
+});
+
 async function runDashboardHealthCheck() {
   setHealthBadge("pending", "Running background worker and chrome.storage.local test...");
   try {
@@ -773,6 +1129,26 @@ async function refreshValidationState() {
     renderComparisonReport(validationState.comparisonReport);
   } catch {
     // Ignore initial validation load errors.
+  }
+}
+
+async function refreshBulkStatus() {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: MESSAGE_TYPES.BULK_GET_STATUS,
+    });
+    if (response?.ok) {
+      renderBulkJobState(response);
+      if (response.recovered) {
+        showBanner(
+          bulkFeedbackEl,
+          "warning",
+          response.job?.interruptionReason || "Interrupted bulk job recovered. Re-verify location and click Resume."
+        );
+      }
+    }
+  } catch {
+    // Ignore initial bulk status errors.
   }
 }
 
@@ -950,4 +1326,5 @@ document.addEventListener("DOMContentLoaded", () => {
   refreshLocationStatus({ populateInputs: true });
   refreshRankingState();
   refreshValidationState();
+  refreshBulkStatus();
 });

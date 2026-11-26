@@ -8,8 +8,8 @@ Each phase is built and verified individually before moving to the next.
 | **Phase 2** | Browser geolocation simulation (`chrome.debugger` / `Emulation.setGeolocationOverride`) | **Completed** |
 | **Phase 3** | Google search location verification | **Completed (Automated Tests Passed; Manual Chrome Verification Pending)** |
 | **Phase 4** | Single keyword organic ranking detection | **Completed (Automated Tests Passed; Manual Chrome Verification Pending)** |
-| **Phase 5** | Accuracy comparison against GS Location Changer | **Implemented (Automated Tests Passed; Manual Chrome Verification Pending)** |
-| **Phase 6** | Bulk keyword checking and job management | Pending |
+| **Phase 5** | Accuracy comparison against GS Location Changer | **Completed (Automated Tests Passed; Manual Chrome Verification Pending)** |
+| **Phase 6** | Bulk keyword checking and job management | **Implemented (Automated Tests Passed; Manual Chrome Verification Pending)** |
 | **Phase 7** | Multiple client configuration | Pending |
 | **Phase 8** | Google Sheets authentication and reading | Pending |
 | **Phase 9** | Google Sheets updating with complete design preservation | Pending |

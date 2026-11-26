@@ -544,6 +544,51 @@ export function createGeolocationController({ chromeApi = globalThis.chrome, sto
     return { ok: true, state: nextState };
   }
 
+  async function recordLiveCheckVerification({
+    tabId,
+    pageUrl,
+    gpsCheck,
+    googleFooterCheck,
+  }) {
+    const current = await loadLocationState(storageClient);
+    if (!current.config || current.tabId !== tabId) {
+      return current;
+    }
+
+    const next = {
+      ...current,
+      tabUrl: pageUrl || current.tabUrl,
+      browserGpsStatus: gpsCheck?.state || current.browserGpsStatus,
+      permissionStatus: gpsCheck?.permissionStatus || current.permissionStatus,
+      reportedCoords: gpsCheck?.reportedCoords || current.reportedCoords,
+      lastVerifiedAt: gpsCheck?.lastVerifiedAt || current.lastVerifiedAt,
+    };
+
+    if (googleFooterCheck?.status === GOOGLE_LOCATION_STATUSES.MATCHED) {
+      next.googleLocationStatus = googleFooterCheck.status;
+      next.googleDetectedLocation = googleFooterCheck.detectedLocation;
+      next.googleLocationSource = googleFooterCheck.locationSource;
+      next.googleLocationSourceType = googleFooterCheck.locationSourceType;
+      next.googleMatchType = googleFooterCheck.matchType || "none";
+      next.googleLastVerifiedAt = googleFooterCheck.checkedAt;
+      next.googleVerificationEvidence = {
+        pageUrl,
+        checkedAt: googleFooterCheck.checkedAt,
+        matchedBy: googleFooterCheck.matchedBy,
+        sourceType: googleFooterCheck.locationSourceType,
+      };
+      next.state = googleFooterCheck.status;
+    } else if (next.googleVerificationEvidence) {
+      // Same authorized session on a Google search page without a footer keeps session aligned with tabUrl.
+      next.googleVerificationEvidence = {
+        ...next.googleVerificationEvidence,
+        pageUrl,
+      };
+    }
+
+    return saveLocationState(storageClient, next);
+  }
+
   async function handleDebuggerDetached({ tabId, reason }) {
     const current = await loadLocationState(storageClient);
     if (current.tabId !== null && current.tabId === tabId && current.debuggerAttached) {
@@ -629,6 +674,7 @@ export function createGeolocationController({ chromeApi = globalThis.chrome, sto
     openGoogleSearch,
     applyGoogleLocation,
     verifyGoogleLocation,
+    recordLiveCheckVerification,
     resetLocation,
     handleDebuggerDetached,
     handleTabRemoved,
