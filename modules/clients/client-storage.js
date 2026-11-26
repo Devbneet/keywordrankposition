@@ -191,6 +191,23 @@ export function createClientStorage({
     return rows.sort((a, b) => String(b.importedAt || "").localeCompare(String(a.importedAt || "")));
   }
 
+  async function saveUpdateJournalEntry(entry) {
+    if (!entry?.operationId) {
+      return { ok: false, error: "operationId is required." };
+    }
+    return db.putOne(STORES.UPDATE_JOURNAL, entry);
+  }
+
+  async function listUpdateJournalByClient(clientId) {
+    const rows = await db.getByIndex(STORES.UPDATE_JOURNAL, "by_client", clientId);
+    return rows.sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
+  }
+
+  async function listUpdateJournalBySpreadsheet(spreadsheetId) {
+    const rows = await db.getByIndex(STORES.UPDATE_JOURNAL, "by_spreadsheet", spreadsheetId);
+    return rows.sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
+  }
+
   return {
     getSchemaInfo: db.getSchemaInfo,
     saveClient,
@@ -209,6 +226,9 @@ export function createClientStorage({
     listResultsByClient,
     saveSheetSnapshot,
     listSheetSnapshotsByClient,
+    saveUpdateJournalEntry,
+    listUpdateJournalByClient,
+    listUpdateJournalBySpreadsheet,
     deleteClientCascade,
     createClientBackup,
     listClientBackups,

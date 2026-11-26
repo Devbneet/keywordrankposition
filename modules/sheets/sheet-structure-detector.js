@@ -7,6 +7,7 @@
 
 import { DEFAULT_SHEET_COLUMNS, normalizeColumnLetter } from "../clients/client-validator.js";
 import { columnLettersToIndex, indexToColumnLetters } from "./sheet-range-validator.js";
+import { normalizeWorksheetId } from "./spreadsheet-validator.js";
 
 export const DEFAULT_HEADER_ALIASES = Object.freeze({
   keyword: ["keyword", "keywords", "search query", "query", "target keyword"],
@@ -161,6 +162,9 @@ export function detectSheetStructure({
   merges = [],
   protectedRanges = [],
   hasFilter = false,
+  basicFilter = null,
+  filterViewsCount = 0,
+  conditionalFormats = null,
   gridSheet = null,
   columnConfig = {},
 } = {}) {
@@ -403,10 +407,22 @@ export function detectSheetStructure({
     }
   }
 
+  const effectiveConditionalFormats = conditionalFormats || gridSheet?.conditionalFormats || [];
+  const effectiveBasicFilter = basicFilter || gridSheet?.basicFilter || null;
+  const columnWidths = (gridDataBlock?.columnMetadata || []).map((m, idx) => ({
+    colIndex: idx,
+    columnLetter: indexToColumnLetters(idx + 1),
+    pixelSize: m?.pixelSize ?? null,
+  })).filter((c) => c.pixelSize !== null);
+  const rowHeights = (gridDataBlock?.rowMetadata || []).map((m, idx) => ({
+    rowNumber: idx + 1,
+    pixelSize: m?.pixelSize ?? null,
+  })).filter((r) => r.pixelSize !== null);
+
   return {
     spreadsheetId,
     spreadsheetTitle,
-    worksheetId: String(worksheetId || ""),
+    worksheetId: normalizeWorksheetId(worksheetId),
     worksheetName,
     locale: locale || "",
     timeZone: timeZone || "",
@@ -436,11 +452,32 @@ export function detectSheetStructure({
       description: p.description || "",
       range: p.range || null,
     })),
-    hasFilter: Boolean(hasFilter),
+    hasFilter: Boolean(hasFilter || effectiveBasicFilter || filterViewsCount > 0),
+    filterSummary: {
+      hasBasicFilter: Boolean(hasFilter || effectiveBasicFilter),
+      basicFilterRange: effectiveBasicFilter?.range || null,
+      filterViewsCount: Number(filterViewsCount || (gridSheet?.filterViews || []).length || 0),
+    },
+    conditionalFormats: effectiveConditionalFormats,
+    conditionalFormatsCount: effectiveConditionalFormats.length,
     formattingMetadata: {
       detectedColors: [...detectedColors],
       customRowHeightsCount: rowHeightsCount,
       customColumnWidthsCount: colWidthsCount,
+      columnWidths,
+      rowHeightsCount: rowHeights.length,
+      templateHeaderFormat:
+        firstHeaderCandidateIdx !== -1
+          ? rowGridMeta[firstHeaderCandidateIdx]?.values?.[activeColMap.latestDateIdx]?.userEnteredFormat ||
+            rowGridMeta[firstHeaderCandidateIdx]?.values?.[activeColMap.latestDateIdx]?.effectiveFormat ||
+            null
+          : null,
+      templateDataFormat:
+        keywordRows[0]
+          ? rowGridMeta[keywordRows[0].rowNumber - 1]?.values?.[activeColMap.latestDateIdx]?.userEnteredFormat ||
+            rowGridMeta[keywordRows[0].rowNumber - 1]?.values?.[activeColMap.latestDateIdx]?.effectiveFormat ||
+            null
+          : null,
     },
     isAmbiguous,
     warnings,

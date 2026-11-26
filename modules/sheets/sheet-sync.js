@@ -6,6 +6,7 @@
  */
 
 import { compareSnapshotWithStructure } from "./sheet-snapshot.js";
+import { normalizeWorksheetId } from "./spreadsheet-validator.js";
 
 export function computeSheetSyncDiff({
   previousSnapshot = null,
@@ -14,13 +15,13 @@ export function computeSheetSyncDiff({
   currentStructure,
 }) {
   const spreadsheetId = currentStructure.spreadsheetId;
-  const worksheetId = String(currentStructure.worksheetId || "");
+  const worksheetId = normalizeWorksheetId(currentStructure.worksheetId);
 
   const scopedSaved = savedKeywords.filter(
     (k) =>
       k.source === "google_sheets" &&
       k.spreadsheetId === spreadsheetId &&
-      String(k.worksheetId || "") === worksheetId
+      normalizeWorksheetId(k.worksheetId) === worksheetId
   );
 
   const savedByRow = new Map(scopedSaved.map((k) => [Number(k.rowNumber || k.rowPosition), k]));
@@ -164,12 +165,13 @@ export async function applyConfirmedSheetSync({
     return { ok: false, error: "clientId and snapshot are required to save synced keywords." };
   }
 
+  const wsId = normalizeWorksheetId(snapshot.worksheetId);
   const allClientKeywords = await clientStorage.listKeywordsByClient(clientId);
   const previousForSheet = allClientKeywords.filter(
     (k) =>
       k.source === "google_sheets" &&
       k.spreadsheetId === snapshot.spreadsheetId &&
-      String(k.worksheetId || "") === String(snapshot.worksheetId || "")
+      normalizeWorksheetId(k.worksheetId) === wsId
   );
 
   for (const oldKw of previousForSheet) {

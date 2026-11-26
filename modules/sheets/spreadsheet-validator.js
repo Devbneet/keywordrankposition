@@ -3,6 +3,12 @@
  * and strictly verifies the intended worksheet against Google Sheets API metadata.
  */
 
+export function normalizeWorksheetId(value) {
+  if (value === 0) return "0";
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
 export function parseGoogleSheetUrl(urlOrId) {
   const raw = String(urlOrId || "").trim();
   if (!raw) {
@@ -38,7 +44,7 @@ export function parseGoogleSheetUrl(urlOrId) {
  */
 export function resolveTargetWorksheet(sheets = [], { worksheetId = "", worksheetName = "" } = {}) {
   const normalizedList = sheets.map((s) => ({
-    sheetId: String(s.properties?.sheetId ?? ""),
+    sheetId: normalizeWorksheetId(s.properties?.sheetId),
     title: String(s.properties?.title || ""),
     index: s.properties?.index ?? 0,
     rowCount: s.properties?.gridProperties?.rowCount ?? 0,
@@ -50,7 +56,7 @@ export function resolveTargetWorksheet(sheets = [], { worksheetId = "", workshee
     return { ok: false, error: "Spreadsheet contains no worksheets.", availableWorksheets: [] };
   }
 
-  const cleanId = String(worksheetId || "").trim();
+  const cleanId = normalizeWorksheetId(worksheetId);
   const cleanName = String(worksheetName || "").trim();
 
   if (cleanId) {

@@ -3,9 +3,8 @@
 Follow these steps to configure Google Sheets API read-only authentication (`Phase 8`) for **Digital Minds Rank Tracker** without storing private credentials or secrets in Git.
 
 > **Important Scope Notice:**  
-> Phase 8 requests strictly the read-only scope:  
-> `https://www.googleapis.com/auth/spreadsheets.readonly`  
-> Google OAuth applies this permission at the Google Account level—once approved, the extension can **read** spreadsheets accessible to that signed-in Google account, not only a single worksheet. It **cannot** edit, insert, delete, or format any spreadsheet data, and does **not** request broad Google Drive permissions.
+> - **Phase 8 (Default Read-Only):** Uses `https://www.googleapis.com/auth/spreadsheets.readonly`. Grants read-only access to spreadsheets accessible to the signed-in Google account.  
+> - **Phase 9 (Opt-In Spreadsheet Updates):** When the user explicitly clicks **Enable Write Access**, Chrome requests `https://www.googleapis.com/auth/spreadsheets`. This write scope allows modifying spreadsheets accessible to that authenticated Google account. Broad Google Drive scopes are **not** requested unless separately approved. Read-only mode stays usable even if write permission is not granted.
 
 ---
 

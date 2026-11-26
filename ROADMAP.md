@@ -11,8 +11,8 @@ Each phase is built and verified individually before moving to the next.
 | **Phase 5** | Accuracy comparison against GS Location Changer | **Completed (Automated Tests Passed; Manual Chrome Verification Pending)** |
 | **Phase 6** | Bulk keyword checking and job management | **Completed (Automated Tests Passed; Manual Chrome Verification Pending)** |
 | **Phase 7** | Multiple client configuration | **Completed (Automated Tests Passed; Manual Chrome Verification Pending)** |
-| **Phase 8** | Google Sheets authentication and reading | **Implemented (Automated Tests Passed; Live OAuth & Sheets Verification Pending)** |
-| **Phase 9** | Google Sheets updating with complete design preservation | Pending |
+| **Phase 8** | Google Sheets authentication and reading | **Completed (Automated Tests Passed; Live OAuth & Sheets Verification Pending)** |
+| **Phase 9** | Google Sheets updating with complete design preservation | **Implemented (Automated Tests Passed; Sandbox & Live Verification Pending)** |
 | **Phase 10** | Agency dashboard and ranking history | Pending |
 | **Phase 11** | Weekly scheduling, recovery and error handling | Pending |
 | **Phase 12** | Final testing and deployment | Pending |

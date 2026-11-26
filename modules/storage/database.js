@@ -37,6 +37,8 @@ function getKeyFieldForStore(storeName) {
       return "backupId";
     case STORES.SHEET_SNAPSHOTS:
       return "snapshotKey";
+    case STORES.UPDATE_JOURNAL:
+      return "operationId";
     default:
       return "id";
   }

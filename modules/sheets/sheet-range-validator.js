@@ -80,19 +80,22 @@ export function doRangeBoundsOverlap(a, b) {
   return colOverlap && rowOverlap;
 }
 
+import { normalizeWorksheetId } from "./spreadsheet-validator.js";
+
 /**
  * Prevent multiple locations under the same client from owning overlapping ranges
  * or colliding on the same worksheet unless explicitly separated cleanly.
+ * Preserves case-sensitive Google Spreadsheet IDs and numeric worksheet ID 0.
  */
 export function validateLocationWorksheetIsolation({ sheetConfig, locations = [] }) {
   if (locations.length <= 1) {
     return { valid: true, collisions: [] };
   }
 
-  const spreadsheetScope = String(sheetConfig?.spreadsheetId || "").trim().toLowerCase() || "default";
+  const spreadsheetScope = String(sheetConfig?.spreadsheetId || "").trim() || "default";
   const hasExplicitConfig =
     Boolean(sheetConfig?.spreadsheetId) ||
-    locations.some((loc) => Boolean(loc.worksheetName || loc.worksheetId || loc.reportingRange));
+    locations.some((loc) => Boolean(loc.worksheetName || normalizeWorksheetId(loc.worksheetId) || loc.reportingRange));
 
   if (!hasExplicitConfig) {
     return { valid: true, collisions: [] };
@@ -107,12 +110,12 @@ export function validateLocationWorksheetIsolation({ sheetConfig, locations = []
       const ovA = sheetConfig?.locationSheetMappings?.[a.locationId] || {};
       const ovB = sheetConfig?.locationSheetMappings?.[b.locationId] || {};
 
-      const wsIdA = String(a.worksheetId || ovA.worksheetId || "").trim();
-      const wsIdB = String(b.worksheetId || ovB.worksheetId || "").trim();
+      const wsIdA = normalizeWorksheetId(a.worksheetId) || normalizeWorksheetId(ovA.worksheetId) || normalizeWorksheetId(sheetConfig?.worksheetId);
+      const wsIdB = normalizeWorksheetId(b.worksheetId) || normalizeWorksheetId(ovB.worksheetId) || normalizeWorksheetId(sheetConfig?.worksheetId);
       const wsNameA = String(a.worksheetName || ovA.worksheetName || sheetConfig?.worksheetName || "Keywords").trim().toLowerCase();
       const wsNameB = String(b.worksheetName || ovB.worksheetName || sheetConfig?.worksheetName || "Keywords").trim().toLowerCase();
 
-      const sameWorksheet = (wsIdA && wsIdB && wsIdA === wsIdB) || wsNameA === wsNameB;
+      const sameWorksheet = (wsIdA !== "" && wsIdB !== "" && wsIdA === wsIdB) || wsNameA === wsNameB;
       if (!sameWorksheet) {
         continue;
       }
@@ -133,6 +136,74 @@ export function validateLocationWorksheetIsolation({ sheetConfig, locations = []
           `Locations '${a.locationName}' and '${b.locationName}' target the same worksheet '${wsNameA}'. Assign separate worksheets or enable an explicit sharedWorksheetStrategy.`
         );
       }
+    }
+  }
+
+  return {
+    valid: collisions.length === 0,
+    collisions,
+  };
+}
+
+/**
+ * Detect overlapping reporting configurations across multiple agency clients.
+ * Case-sensitive on spreadsheetId; prevents two clients from independently inserting
+ * columns on the same worksheet.
+ */
+export function validateCrossClientSheetConfigurations({ clients = [], locationsByClient = {} } = {}) {
+  const collisions = [];
+  const entries = [];
+
+  for (const client of clients) {
+    const spreadsheetId = String(client?.sheetConfig?.spreadsheetId || "").trim();
+    if (!spreadsheetId) continue;
+
+    const locs = locationsByClient[client.clientId] || [];
+    if (locs.length === 0) {
+      entries.push({
+        clientId: client.clientId,
+        clientName: client.clientName,
+        locationName: "Default",
+        spreadsheetId,
+        worksheetId: normalizeWorksheetId(client.sheetConfig?.worksheetId),
+        worksheetName: String(client.sheetConfig?.worksheetName || "Keywords").trim().toLowerCase(),
+        rangeStr: String(client.sheetConfig?.latestDateColumn || "H").trim(),
+      });
+    } else {
+      for (const loc of locs) {
+        const ov = client.sheetConfig?.locationSheetMappings?.[loc.locationId] || {};
+        entries.push({
+          clientId: client.clientId,
+          clientName: client.clientName,
+          locationName: loc.locationName || "Location",
+          spreadsheetId,
+          worksheetId: normalizeWorksheetId(loc.worksheetId) || normalizeWorksheetId(ov.worksheetId) || normalizeWorksheetId(client.sheetConfig?.worksheetId),
+          worksheetName: String(loc.worksheetName || ov.worksheetName || client.sheetConfig?.worksheetName || "Keywords").trim().toLowerCase(),
+          rangeStr: String(loc.reportingRange || ov.latestDateColumn || client.sheetConfig?.latestDateColumn || "H").trim(),
+        });
+      }
+    }
+  }
+
+  for (let i = 0; i < entries.length; i += 1) {
+    for (let j = i + 1; j < entries.length; j += 1) {
+      const a = entries[i];
+      const b = entries[j];
+      if (a.clientId === b.clientId) continue;
+      if (a.spreadsheetId !== b.spreadsheetId) continue; // Case-sensitive exact spreadsheetId match!
+
+      const sameWorksheet =
+        (a.worksheetId !== "" && b.worksheetId !== "" && a.worksheetId === b.worksheetId) ||
+        a.worksheetName === b.worksheetName;
+      if (!sameWorksheet) continue;
+
+      const boundsA = parseRangeBounds(a.rangeStr);
+      const boundsB = parseRangeBounds(b.rangeStr);
+      const overlap = doRangeBoundsOverlap(boundsA, boundsB);
+
+      collisions.push(
+        `Client '${a.clientName}' (${a.locationName}) and Client '${b.clientName}' (${b.locationName}) target the same Google Sheet (${a.spreadsheetId} / ${a.worksheetName})${overlap ? ` with overlapping ranges (${a.rangeStr} vs ${b.rangeStr})` : ""}. Separate clients must not independently insert columns on the same worksheet.`
+      );
     }
   }
 

@@ -277,6 +277,39 @@ const bulkImportSheetsBtn = document.getElementById("btn-bulk-import-sheets");
 
 let latestSheetReadResult = null;
 let excludedSheetRows = new Set();
+
+// Google Sheets Update controls (Phase 9)
+const updStatusPillEl = document.getElementById("upd-status-pill");
+const updClientSelect = document.getElementById("upd-client-select");
+const updLocationSelect = document.getElementById("upd-location-select");
+const updJobSelect = document.getElementById("upd-job-select");
+const updDateInput = document.getElementById("upd-date-input");
+const updModeSelect = document.getElementById("upd-mode-select");
+const updWriteAccessBadgeEl = document.getElementById("upd-write-access-badge");
+const updEnableWriteBtn = document.getElementById("btn-upd-enable-write");
+const updFeedbackEl = document.getElementById("upd-feedback");
+const updPreviewBtn = document.getElementById("btn-upd-preview");
+const updBackupBtn = document.getElementById("btn-upd-backup");
+const updExecuteBtn = document.getElementById("btn-upd-execute");
+const updVerifyBtn = document.getElementById("btn-upd-verify");
+const updHistoryBtn = document.getElementById("btn-upd-history");
+const updOpenSheetBtn = document.getElementById("btn-upd-open-sheet");
+const updViewBackupBtn = document.getElementById("btn-upd-view-backup");
+const updConfirmChk = document.getElementById("upd-confirm-chk");
+const updPreviewPanel = document.getElementById("upd-preview-panel");
+const updMTargetEl = document.getElementById("upd-m-target");
+const updMDatePlanEl = document.getElementById("upd-m-date-plan");
+const updMCountsEl = document.getElementById("upd-m-counts");
+const updMSerpHdrEl = document.getElementById("upd-m-serp-hdr");
+const updMBackupEl = document.getElementById("upd-m-backup");
+const updMStructureEl = document.getElementById("upd-m-structure");
+const updPreviewTbody = document.getElementById("upd-preview-tbody");
+const updJournalPanel = document.getElementById("upd-journal-panel");
+const updJournalTbody = document.getElementById("upd-journal-tbody");
+
+let latestUpdatePreviewState = null;
+let latestVerifiedBackup = null;
+let writeAccessEnabledState = false;
 let validationState = {
   tolerance: 1,
   deviceType: "Desktop",
@@ -1481,6 +1514,8 @@ function renderClientWorkspace(workspace) {
     sheetsIdInput.value = client.sheetConfig.spreadsheetId;
   }
 
+  populateUpdateControlsFromWorkspace(workspace);
+
   rankDomainInput.value = client.websiteDomain || "";
   if (selectedLocation) {
     applyLocationRecordToInputs(selectedLocation);
@@ -2092,6 +2127,9 @@ async function refreshGoogleAuthStatus() {
   try {
     const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SHEETS_GET_AUTH_STATUS });
     if (!res?.ok) return;
+    if (typeof syncWriteAccessBadgeFromAuth === "function") {
+      syncWriteAccessBadgeFromAuth(res);
+    }
     sheetsOauthStatusEl.textContent = res.oauthConfigured
       ? "Configured (spreadsheets.readonly)"
       : "OAuth Client ID not configured";
@@ -2358,6 +2396,333 @@ sheetsConfirmImportBtn.addEventListener("click", async () => {
     "success",
     `Saved ${res.savedCount} Google Sheet keyword row(s) and structure snapshot locally.`
   );
+});
+
+// Phase 9 Format-Preserving Google Sheets Update UI handlers
+function setUpdateOperationStatus(statusLabel) {
+  updStatusPillEl.className = "pill";
+  updStatusPillEl.textContent = statusLabel || "Ready";
+  if (statusLabel === "Update successful" || statusLabel === "Backup verified") {
+    updStatusPillEl.classList.add("pill-healthy");
+  } else if (
+    statusLabel === "Structure changed" ||
+    statusLabel === "Update failed" ||
+    statusLabel === "Verification failed" ||
+    statusLabel === "Recovery required" ||
+    statusLabel === "Authentication required"
+  ) {
+    updStatusPillEl.classList.add("pill-error");
+  } else if (
+    statusLabel === "Preview generated" ||
+    statusLabel === "Updating" ||
+    statusLabel === "Verification in progress" ||
+    statusLabel === "Awaiting confirmation" ||
+    statusLabel === "Backup required"
+  ) {
+    updStatusPillEl.classList.add("pill-pending");
+  } else {
+    updStatusPillEl.classList.add("pill-neutral");
+  }
+  syncUpdateButtonStates();
+}
+
+function syncUpdateButtonStates() {
+  const hasClient = Boolean(updClientSelect.value);
+  const hasSheet = Boolean(activeClientWorkspace?.client?.sheetConfig?.spreadsheetId);
+  const hasBackup = Boolean(latestVerifiedBackup?.backupId);
+  const hasPreview = Boolean(latestUpdatePreviewState?.planFingerprint);
+  const isDryRun = updModeSelect.value === "dry-run";
+  const confirmed = Boolean(updConfirmChk.checked);
+
+  updPreviewBtn.disabled = !hasClient || !updJobSelect.value || !hasSheet;
+  updBackupBtn.disabled = !hasClient || !hasSheet;
+  updOpenSheetBtn.disabled = !hasSheet;
+  updViewBackupBtn.disabled = !hasBackup;
+  updVerifyBtn.disabled = !hasPreview;
+  updExecuteBtn.disabled =
+    !hasPreview || !hasBackup || !confirmed || !writeAccessEnabledState || isDryRun;
+}
+
+function populateUpdateControlsFromWorkspace(workspace) {
+  const client = workspace?.client;
+  if (!client) return;
+
+  updClientSelect.replaceChildren();
+  const cOpt = document.createElement("option");
+  cOpt.value = client.clientId;
+  cOpt.textContent = `${client.clientName} (${client.websiteDomain})`;
+  updClientSelect.appendChild(cOpt);
+
+  updLocationSelect.replaceChildren();
+  for (const loc of workspace.locations || []) {
+    const opt = document.createElement("option");
+    opt.value = loc.locationId;
+    opt.textContent = loc.locationName;
+    if (workspace.selectedLocation?.locationId === loc.locationId) opt.selected = true;
+    updLocationSelect.appendChild(opt);
+  }
+
+  updJobSelect.replaceChildren();
+  const jobs = workspace.jobs || [];
+  if (jobs.length === 0) {
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = "No completed jobs for this client yet";
+    updJobSelect.appendChild(empty);
+  } else {
+    for (const j of jobs) {
+      const opt = document.createElement("option");
+      opt.value = j.jobId;
+      opt.textContent = `${j.jobId} · ${j.state} (${j.totalKeywords || 0} kws)`;
+      updJobSelect.appendChild(opt);
+    }
+  }
+
+  if (!updDateInput.value) {
+    updDateInput.value = new Date().toISOString().slice(0, 10);
+  }
+
+  // Invalidate prior preview/backup when client switches
+  latestUpdatePreviewState = null;
+  latestVerifiedBackup = null;
+  updConfirmChk.checked = false;
+  updPreviewPanel.classList.add("hidden");
+  syncUpdateButtonStates();
+}
+
+function syncWriteAccessBadgeFromAuth(authRes) {
+  writeAccessEnabledState = Boolean(authRes?.writeAccessEnabled);
+  updWriteAccessBadgeEl.className = `pill ${writeAccessEnabledState ? "pill-healthy" : "pill-neutral"}`;
+  updWriteAccessBadgeEl.textContent = writeAccessEnabledState ? "Write access enabled" : "Read-only access";
+  updEnableWriteBtn.textContent = writeAccessEnabledState ? "Disable Write Access" : "Enable Write Access";
+  syncUpdateButtonStates();
+}
+
+updEnableWriteBtn.addEventListener("click", async () => {
+  showBanner(updFeedbackEl, null, "");
+  if (writeAccessEnabledState) {
+    await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SHEETS_DISABLE_WRITE });
+    const statusRes = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SHEETS_GET_AUTH_STATUS });
+    syncWriteAccessBadgeFromAuth(statusRes);
+    setUpdateOperationStatus("Read-only access");
+    showBanner(updFeedbackEl, "warning", "Reverted to Read-only Google Sheets access.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    "Enabling Write Access requests Google OAuth scope 'https://www.googleapis.com/auth/spreadsheets', which allows modifying spreadsheets accessible to your authenticated Google account. Proceed?"
+  );
+  if (!confirmed) return;
+
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.SHEETS_ENABLE_WRITE,
+    payload: { userConfirmed: true },
+  });
+  const statusRes = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SHEETS_GET_AUTH_STATUS });
+  syncWriteAccessBadgeFromAuth(statusRes);
+  if (res?.ok) {
+    setUpdateOperationStatus("Ready");
+    showBanner(updFeedbackEl, "success", "Google Sheets Write Access enabled (strictly preview + backup gated).");
+  } else {
+    setUpdateOperationStatus("Authentication required");
+    showBanner(updFeedbackEl, "error", res?.error || "Unable to enable Google Sheets write access.");
+  }
+});
+
+updModeSelect.addEventListener("change", syncUpdateButtonStates);
+updConfirmChk.addEventListener("change", syncUpdateButtonStates);
+
+updBackupBtn.addEventListener("click", async () => {
+  const client = activeClientWorkspace?.client;
+  if (!client?.sheetConfig?.spreadsheetId) return;
+  showBanner(updFeedbackEl, null, "");
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.SHEETS_BACKUP_CREATE,
+    payload: {
+      clientId: client.clientId,
+      spreadsheetId: client.sheetConfig.spreadsheetId,
+      worksheetId: client.sheetConfig.worksheetId,
+      worksheetName: client.sheetConfig.worksheetName,
+      jobId: updJobSelect.value || null,
+    },
+  });
+  if (!res?.ok) {
+    setUpdateOperationStatus("Backup required");
+    showBanner(updFeedbackEl, "error", res?.error || "Recoverable backup failed.");
+    return;
+  }
+  latestVerifiedBackup = res.backup;
+  setUpdateOperationStatus("Backup verified");
+  updMBackupEl.textContent = `Verified (${res.backup.backupId})`;
+  showBanner(
+    updFeedbackEl,
+    "success",
+    `Verified recoverable sheet backup '${res.backup.backupId}' stored locally.`
+  );
+  syncUpdateButtonStates();
+});
+
+updPreviewBtn.addEventListener("click", async () => {
+  const client = activeClientWorkspace?.client;
+  if (!client || !updJobSelect.value) return;
+  showBanner(updFeedbackEl, null, "");
+
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.SHEETS_UPDATE_PREVIEW,
+    payload: {
+      clientId: client.clientId,
+      locationId: updLocationSelect.value || null,
+      jobId: updJobSelect.value,
+      reportingDate: updDateInput.value,
+      backupId: latestVerifiedBackup?.backupId || null,
+    },
+  });
+
+  if (!res?.ok) {
+    setUpdateOperationStatus(res?.operationStatus || "Structure changed");
+    showBanner(updFeedbackEl, "error", res?.errors?.join(" ") || res?.error || "Preview failed.");
+    return;
+  }
+
+  latestUpdatePreviewState = res.preview;
+  updConfirmChk.checked = false;
+  updPreviewPanel.classList.remove("hidden");
+  updMTargetEl.textContent = `${res.preview.spreadsheetTitle} / ${res.preview.worksheetName}`;
+  updMDatePlanEl.textContent = res.preview.willInsertColumn
+    ? `Insert Col ${res.preview.targetColumnLetter}: '${res.preview.reportingDate}'`
+    : `Reuse Col ${res.preview.targetColumnLetter}: '${res.preview.reportingDate}'`;
+  updMCountsEl.textContent = `${res.preview.validRankingUpdates} / ${res.preview.confirmedNaUpdates} / ${res.preview.skippedOrFailedCount}`;
+  updMSerpHdrEl.textContent = `${res.preview.serpUrlsToUpdate} / ${res.preview.dateHeadersToUpdate}`;
+  updMBackupEl.textContent = res.preview.backupStatus;
+  updMStructureEl.textContent = res.preview.structureStatus;
+
+  updPreviewTbody.replaceChildren();
+  for (const row of res.preview.beforeAfterRows || []) {
+    const tr = document.createElement("tr");
+    for (const val of [
+      String(row.rowNumber),
+      row.keyword,
+      row.previousRank,
+      row.newRank,
+      row.previousSerpUrl,
+      row.newSerpUrl,
+      row.updateStatus,
+    ]) {
+      const td = document.createElement("td");
+      td.textContent = val;
+      tr.appendChild(td);
+    }
+    updPreviewTbody.appendChild(tr);
+  }
+
+  setUpdateOperationStatus(
+    res.preview.backupVerified ? "Awaiting confirmation" : "Backup required"
+  );
+  showBanner(
+    updFeedbackEl,
+    res.preview.risks.length > 0 ? "warning" : "success",
+    res.preview.risks.length > 0
+      ? `Dry-run preview generated with warnings: ${res.preview.risks.join(" ")}`
+      : "Dry-run preview ready. Review changes, create verified backup, and confirm before updating."
+  );
+});
+
+updExecuteBtn.addEventListener("click", async () => {
+  const client = activeClientWorkspace?.client;
+  if (!client || !latestUpdatePreviewState || !latestVerifiedBackup) return;
+  showBanner(updFeedbackEl, null, "");
+  setUpdateOperationStatus("Updating");
+
+  const mode = updModeSelect.value;
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.SHEETS_UPDATE_EXECUTE,
+    payload: {
+      clientId: client.clientId,
+      locationId: updLocationSelect.value || null,
+      jobId: updJobSelect.value,
+      approvedPreview: latestUpdatePreviewState,
+      approvalConfirmation: Boolean(updConfirmChk.checked),
+      backupId: latestVerifiedBackup.backupId,
+      reportingDate: updDateInput.value,
+      mode,
+      dryRun: mode === "dry-run",
+    },
+  });
+
+  setUpdateOperationStatus(res?.operationStatus || (res?.ok ? "Update successful" : "Update failed"));
+  if (res?.ok) {
+    showBanner(
+      updFeedbackEl,
+      "success",
+      `Google Sheet updated and verified cleanly (Operation ${res.operationId}).`
+    );
+  } else {
+    showBanner(
+      updFeedbackEl,
+      "error",
+      res?.error || "Update failed or verification detected issues. Review journal & backup."
+    );
+  }
+});
+
+updVerifyBtn.addEventListener("click", () => updPreviewBtn.click());
+
+updOpenSheetBtn.addEventListener("click", () => {
+  const url =
+    activeClientWorkspace?.client?.sheetConfig?.sheetUrl ||
+    (activeClientWorkspace?.client?.sheetConfig?.spreadsheetId
+      ? `https://docs.google.com/spreadsheets/d/${activeClientWorkspace.client.sheetConfig.spreadsheetId}/edit`
+      : "");
+  if (url) {
+    window.open(url, "_blank", "noopener");
+  }
+});
+
+updViewBackupBtn.addEventListener("click", () => {
+  if (!latestVerifiedBackup) return;
+  downloadTextFile(
+    `${latestVerifiedBackup.backupId}.json`,
+    JSON.stringify(latestVerifiedBackup, null, 2),
+    "application/json;charset=utf-8"
+  );
+});
+
+updHistoryBtn.addEventListener("click", async () => {
+  const client = activeClientWorkspace?.client;
+  if (!client) return;
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.SHEETS_UPDATE_JOURNAL_LIST,
+    payload: { clientId: client.clientId },
+  });
+  updJournalPanel.classList.remove("hidden");
+  updJournalTbody.replaceChildren();
+  const rows = res?.journal || [];
+  if (rows.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 6;
+    td.className = "muted";
+    td.textContent = "No spreadsheet update operations recorded for this client yet.";
+    tr.appendChild(td);
+    updJournalTbody.appendChild(tr);
+    return;
+  }
+  for (const op of rows) {
+    const tr = document.createElement("tr");
+    for (const val of [
+      op.operationId,
+      op.targetDate || "-",
+      op.worksheetName || op.worksheetId || "-",
+      op.mode || "dry-run",
+      op.status || "-",
+      op.backupId || "-",
+    ]) {
+      const td = document.createElement("td");
+      td.textContent = val;
+      tr.appendChild(td);
+    }
+    updJournalTbody.appendChild(tr);
+  }
 });
 
 clientExportBtn.addEventListener("click", async () => {

@@ -4,6 +4,7 @@
  */
 
 export const READONLY_SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly";
+export const WRITE_SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 
 export const AUTH_STATES = Object.freeze({
   UNCONFIGURED: "OAuth not configured",
@@ -15,6 +16,7 @@ export const AUTH_STATES = Object.freeze({
 });
 
 export const AUTH_STATUS_STORAGE_KEY = "dm_google_auth_metadata";
+export const WRITE_ACCESS_PREF_KEY = "dm_sheets_write_enabled";
 
 function isPlaceholderClientId(clientId) {
   const clean = String(clientId || "").trim();
@@ -24,11 +26,17 @@ function isPlaceholderClientId(clientId) {
 
 /**
  * Inspect manifest oauth2 settings without mutating or leaking credentials.
+ * In read-only default mode, only spreadsheets.readonly is expected in manifest.
+ * When allowWriteScope is enabled explicitly for Phase 9 opt-in verification,
+ * spreadsheets write scope is also recognized while blocking broad Drive scopes.
  */
-export function getOAuthConfigStatus(manifest) {
+export function getOAuthConfigStatus(manifest, { allowWriteScope = false } = {}) {
   const oauth2 = manifest?.oauth2;
   const clientId = String(oauth2?.client_id || "").trim();
   const scopes = Array.isArray(oauth2?.scopes) ? oauth2.scopes : [];
+  const permitted = allowWriteScope
+    ? [READONLY_SHEETS_SCOPE, WRITE_SHEETS_SCOPE]
+    : [READONLY_SHEETS_SCOPE];
 
   if (!oauth2 || isPlaceholderClientId(clientId)) {
     return {
@@ -40,18 +48,18 @@ export function getOAuthConfigStatus(manifest) {
     };
   }
 
-  const disallowed = scopes.filter((s) => s !== READONLY_SHEETS_SCOPE);
+  const disallowed = scopes.filter((s) => !permitted.includes(s));
   if (disallowed.length > 0) {
     return {
       configured: false,
       clientIdConfigured: true,
       readOnlyCompliant: false,
       scopes,
-      error: `Disallowed non-readonly OAuth scopes in manifest.json: ${disallowed.join(", ")}`,
+      error: `Disallowed OAuth scopes in manifest.json: ${disallowed.join(", ")}`,
     };
   }
 
-  if (!scopes.includes(READONLY_SHEETS_SCOPE)) {
+  if (!scopes.includes(READONLY_SHEETS_SCOPE) && (!allowWriteScope || !scopes.includes(WRITE_SHEETS_SCOPE))) {
     return {
       configured: false,
       clientIdConfigured: true,
@@ -64,10 +72,11 @@ export function getOAuthConfigStatus(manifest) {
   return {
     configured: true,
     clientIdConfigured: true,
-    readOnlyCompliant: true,
+    readOnlyCompliant: !scopes.includes(WRITE_SHEETS_SCOPE),
+    writeScopeConfigured: scopes.includes(WRITE_SHEETS_SCOPE),
     scopes,
     scopeNotice:
-      "Read-only scope grants read access to Google Sheets accessible to the signed-in Google account, not only the currently selected worksheet.",
+      "Read-only scope grants read access to Google Sheets accessible to the signed-in Google account. Write scope (opt-in only) permits modifications to spreadsheets accessible to that account.",
   };
 }
 
@@ -162,7 +171,7 @@ export function createGoogleAuthClient({
 
   async function getStatus() {
     const manifest = runtimeApi?.getManifest ? runtimeApi.getManifest() : null;
-    const oauthConfig = getOAuthConfigStatus(manifest);
+    const oauthConfig = getOAuthConfigStatus(manifest, { allowWriteScope: true });
     const meta = await loadMeta();
 
     let status = meta.status || AUTH_STATES.DISCONNECTED;
@@ -175,7 +184,9 @@ export function createGoogleAuthClient({
       status,
       oauthConfigured: oauthConfig.configured,
       oauthError: oauthConfig.error || null,
-      scope: READONLY_SHEETS_SCOPE,
+      scope: meta.writeAccessEnabled ? WRITE_SHEETS_SCOPE : READONLY_SHEETS_SCOPE,
+      writeAccessEnabled: Boolean(meta.writeAccessEnabled),
+      writeAuthorizedAt: meta.writeAuthorizedAt || null,
       scopeNotice: oauthConfig.scopeNotice || null,
       lastConnectedAt: meta.lastConnectedAt || null,
       lastTestedAt: meta.lastTestedAt || null,
@@ -183,19 +194,31 @@ export function createGoogleAuthClient({
     };
   }
 
-  async function getValidToken({ interactive = false, forceRefresh = false } = {}) {
+  async function getValidToken({ interactive = false, forceRefresh = false, writeAccess = false } = {}) {
     const manifest = runtimeApi?.getManifest ? runtimeApi.getManifest() : null;
-    const oauthConfig = getOAuthConfigStatus(manifest);
+    const oauthConfig = getOAuthConfigStatus(manifest, { allowWriteScope: Boolean(writeAccess) });
     if (!oauthConfig.configured) {
       await saveMeta({ status: AUTH_STATES.UNCONFIGURED, lastError: oauthConfig.error });
       return { ok: false, state: AUTH_STATES.UNCONFIGURED, error: oauthConfig.error };
     }
 
+    const meta = await loadMeta();
+    if (writeAccess && !meta.writeAccessEnabled && !interactive) {
+      return {
+        ok: false,
+        state: AUTH_STATES.DISCONNECTED,
+        code: "WRITE_ACCESS_NOT_ENABLED",
+        error: "Spreadsheet write access is disabled. Explicitly enable Write Access before updating sheets.",
+      };
+    }
+
+    const requestedScopes = writeAccess ? [WRITE_SHEETS_SCOPE] : [READONLY_SHEETS_SCOPE];
+
     if (forceRefresh) {
       try {
         const staleToken = await callIdentityGetAuthToken(identityApi, {
           interactive: false,
-          scopes: [READONLY_SHEETS_SCOPE],
+          scopes: requestedScopes,
         });
         if (staleToken) {
           await callIdentityRemoveCachedToken(identityApi, staleToken);
@@ -208,7 +231,7 @@ export function createGoogleAuthClient({
     try {
       const token = await callIdentityGetAuthToken(identityApi, {
         interactive: Boolean(interactive),
-        scopes: [READONLY_SHEETS_SCOPE],
+        scopes: requestedScopes,
       });
       if (!token) {
         const msg = "No OAuth access token returned by Chrome Identity API.";
@@ -218,9 +241,10 @@ export function createGoogleAuthClient({
       await saveMeta({
         status: AUTH_STATES.CONNECTED,
         lastConnectedAt: new Date().toISOString(),
+        ...(writeAccess ? { writeAccessEnabled: true, writeAuthorizedAt: new Date().toISOString() } : {}),
         lastError: null,
       });
-      return { ok: true, token };
+      return { ok: true, token, writeAccess: Boolean(writeAccess) };
     } catch (error) {
       const classified = classifyOAuthError(error);
       await saveMeta({ status: classified.state, lastError: classified.message });
@@ -228,8 +252,35 @@ export function createGoogleAuthClient({
     }
   }
 
+  async function enableWriteAccess({ userConfirmed = false } = {}) {
+    if (!userConfirmed) {
+      return {
+        ok: false,
+        error:
+          "Explicit user authorization is required before requesting Google Sheets write scope (https://www.googleapis.com/auth/spreadsheets).",
+      };
+    }
+    return getValidToken({ interactive: true, forceRefresh: false, writeAccess: true });
+  }
+
+  async function disableWriteAccess() {
+    try {
+      const existingWrite = await callIdentityGetAuthToken(identityApi, {
+        interactive: false,
+        scopes: [WRITE_SHEETS_SCOPE],
+      });
+      if (existingWrite) {
+        await callIdentityRemoveCachedToken(identityApi, existingWrite);
+      }
+    } catch {
+      // Best-effort token removal.
+    }
+    await saveMeta({ writeAccessEnabled: false, writeAuthorizedAt: null });
+    return { ok: true, writeAccessEnabled: false };
+  }
+
   async function connect() {
-    return getValidToken({ interactive: true, forceRefresh: false });
+    return getValidToken({ interactive: true, forceRefresh: false, writeAccess: false });
   }
 
   async function disconnect() {
@@ -244,11 +295,13 @@ export function createGoogleAuthClient({
     } catch {
       // Safe best-effort token cache clearing.
     }
+    await disableWriteAccess();
     await saveMeta({
       status: AUTH_STATES.DISCONNECTED,
+      writeAccessEnabled: false,
       lastError: null,
     });
-    return { ok: true, status: AUTH_STATES.DISCONNECTED };
+    return { ok: true, status: AUTH_STATES.DISCONNECTED, writeAccessEnabled: false };
   }
 
   async function markTokenExpired(reason = "Access token expired or rejected (HTTP 401).") {
@@ -318,6 +371,8 @@ export function createGoogleAuthClient({
     getValidToken,
     connect,
     disconnect,
+    enableWriteAccess,
+    disableWriteAccess,
     testConnection,
     markTokenExpired,
     markAuthRevoked,

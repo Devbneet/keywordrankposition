@@ -4,6 +4,7 @@
  */
 
 import { TASK_STATUSES } from "../jobs/job-state.js";
+import { validateCrossClientSheetConfigurations } from "../sheets/sheet-range-validator.js";
 import { validateClientInput } from "./client-validator.js";
 
 export function computeClientOverview({
@@ -45,6 +46,20 @@ export function createClientManager({
   locationController = null,
   jobManager = null,
 }) {
+  async function checkCrossClientCollisions(candidateClient) {
+    if (!candidateClient?.sheetConfig?.spreadsheetId) {
+      return { valid: true, collisions: [] };
+    }
+    const existingClients = await clientStorage.listClients();
+    const others = existingClients.filter((c) => c.clientId !== candidateClient.clientId);
+    const allClients = [...others, candidateClient];
+    const locationsByClient = {};
+    for (const c of allClients) {
+      locationsByClient[c.clientId] = await locationManager.listLocations(c.clientId);
+    }
+    return validateCrossClientSheetConfigurations({ clients: allClients, locationsByClient });
+  }
+
   async function createClient(input) {
     const validated = validateClientInput(input);
     if (!validated.valid) {
@@ -63,6 +78,11 @@ export function createClientManager({
       updatedAt: now,
       lastCheckedAt: null,
     };
+
+    const crossCheck = await checkCrossClientCollisions(record);
+    if (!crossCheck.valid) {
+      return { ok: false, errors: crossCheck.collisions };
+    }
 
     const saveRes = await clientStorage.saveClient(record);
     if (!saveRes.ok) {
@@ -97,6 +117,11 @@ export function createClientManager({
       updatedAt: new Date().toISOString(),
     };
 
+    const crossCheck = await checkCrossClientCollisions(updated);
+    if (!crossCheck.valid) {
+      return { ok: false, errors: crossCheck.collisions };
+    }
+
     const saveRes = await clientStorage.saveClient(updated);
     if (!saveRes.ok) {
       return { ok: false, error: saveRes.error, quotaExceeded: saveRes.quotaExceeded };
@@ -120,7 +145,12 @@ export function createClientManager({
       websiteUrl: source.websiteUrl,
       status: source.status === "archived" ? "inactive" : source.status,
       notes: source.notes,
-      sheetConfig: source.sheetConfig,
+      sheetConfig: {
+        ...(source.sheetConfig || {}),
+        sheetUrl: "",
+        spreadsheetId: "",
+        worksheetId: "",
+      },
     });
     if (!created.ok) return created;
 

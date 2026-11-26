@@ -137,7 +137,7 @@ export function createSheetsApiClient({
     const fields = [
       "spreadsheetId",
       "properties(title,locale,timeZone)",
-      "sheets(properties(sheetId,title,index,gridProperties),merges,protectedRanges,basicFilter,filterViews)",
+      "sheets(properties(sheetId,title,index,gridProperties),merges,protectedRanges,basicFilter,filterViews,conditionalFormats)",
     ].join(",");
     const url = `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}?fields=${encodeURIComponent(fields)}`;
     return requestReadOnlyJson(url);
@@ -147,7 +147,7 @@ export function createSheetsApiClient({
     const fields = [
       "spreadsheetId",
       "properties(title,locale,timeZone)",
-      "sheets(properties(sheetId,title,index,gridProperties),merges,protectedRanges,basicFilter,conditionalFormats,data(rowMetadata(pixelSize),columnMetadata(pixelSize),rowData(values(formattedValue,userEnteredValue,effectiveValue,effectiveFormat(backgroundColor,textFormat(bold,foregroundColor))))))",
+      "sheets(properties(sheetId,title,index,gridProperties),merges,protectedRanges,basicFilter,filterViews,conditionalFormats,data(rowMetadata(pixelSize),columnMetadata(pixelSize),rowData(values(formattedValue,userEnteredValue,effectiveValue,dataValidation,userEnteredFormat(backgroundColor,borders,horizontalAlignment,verticalAlignment,wrapStrategy,numberFormat,textFormat(bold,fontFamily,fontSize,foregroundColor)),effectiveFormat(backgroundColor,borders,horizontalAlignment,verticalAlignment,wrapStrategy,numberFormat,textFormat(bold,fontFamily,fontSize,foregroundColor))))))",
     ].join(",");
     const rangeParams = ranges.map((r) => `ranges=${encodeURIComponent(r)}`).join("&");
     const url = `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}?includeGridData=true${rangeParams ? `&${rangeParams}` : ""}&fields=${encodeURIComponent(fields)}`;

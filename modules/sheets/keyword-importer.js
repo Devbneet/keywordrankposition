@@ -4,6 +4,8 @@
  * preserving original spreadsheet row positions and duplicate keywords.
  */
 
+import { normalizeWorksheetId } from "./spreadsheet-validator.js";
+
 export function buildImportedKeywords({
   clientId,
   locationId = null,
@@ -16,21 +18,22 @@ export function buildImportedKeywords({
   }
   const excludedSet = new Set(excludedRowNumbers.map((n) => Number(n)));
   const now = new Date().toISOString();
+  const wsId = normalizeWorksheetId(structure.worksheetId);
 
   // Preserve previous user exclusions on exact (spreadsheetId, worksheetId, rowNumber, keyword) match if re-reading
   const priorExcluded = new Set(
     existingKeywords
       .filter((k) => k.excluded || k.active === false)
-      .map((k) => `${k.spreadsheetId || ""}::${k.worksheetId || ""}::${k.rowNumber || k.rowPosition}::${k.keyword}`)
+      .map((k) => `${k.spreadsheetId || ""}::${normalizeWorksheetId(k.worksheetId)}::${k.rowNumber || k.rowPosition}::${k.keyword}`)
   );
 
   return (structure.keywordRows || []).map((row, index) => {
     const rowNum = Number(row.rowNumber);
-    const idScope = `${structure.spreadsheetId}_${structure.worksheetId || "ws"}`;
+    const idScope = `${structure.spreadsheetId}_${wsId !== "" ? wsId : "ws"}`;
     const keywordId = `gs_${clientId}_${idScope}_r${rowNum}`;
     const isExcluded =
       excludedSet.has(rowNum) ||
-      priorExcluded.has(`${structure.spreadsheetId}::${structure.worksheetId}::${rowNum}::${row.keyword}`);
+      priorExcluded.has(`${structure.spreadsheetId}::${wsId}::${rowNum}::${row.keyword}`);
 
     return {
       keywordId,
@@ -39,7 +42,7 @@ export function buildImportedKeywords({
       source: "google_sheets",
       spreadsheetId: structure.spreadsheetId,
       spreadsheetTitle: structure.spreadsheetTitle || "",
-      worksheetId: String(structure.worksheetId || ""),
+      worksheetId: wsId,
       worksheetName: structure.worksheetName || "",
       rowNumber: rowNum,
       rowPosition: rowNum,

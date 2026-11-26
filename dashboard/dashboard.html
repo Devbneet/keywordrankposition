@@ -18,7 +18,7 @@
         </div>
           <div class="meta-badges">
           <span class="version-chip">v<span id="dash-version">-</span></span>
-          <span id="dash-phase-chip" class="phase-chip">Phase 8: Google Sheets Read-Only Import</span>
+          <span id="dash-phase-chip" class="phase-chip">Phase 9: Google Sheets Format-Preserving Updates</span>
         </div>
       </div>
     </header>
@@ -307,6 +307,146 @@
                 </tr>
               </thead>
               <tbody id="sheets-preview-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="card sheets-update-card">
+        <div class="card-header">
+          <div>
+            <h2>Google Sheets Update (Phase 9 — Atomic &amp; Format-Preserving)</h2>
+            <p class="muted">
+              Insert one new ranking date column cleanly after SERP while preserving all historical columns, colors, fonts, borders, merges, formulas, filters, and website stats. Defaults strictly to Dry-Run mode.
+            </p>
+          </div>
+          <span id="upd-status-pill" class="pill pill-neutral">Ready</span>
+        </div>
+
+        <div class="location-form">
+          <div class="form-grid-3">
+            <div class="form-row">
+              <label for="upd-client-select">Select Client</label>
+              <select id="upd-client-select">
+                <option value="">Active Client...</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="upd-location-select">Select Location</label>
+              <select id="upd-location-select">
+                <option value="">Selected Location...</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="upd-job-select">Select Ranking Job</label>
+              <select id="upd-job-select">
+                <option value="">Select completed client job...</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-grid-3">
+            <div class="form-row">
+              <label for="upd-date-input">Select Reporting Date</label>
+              <input id="upd-date-input" type="date" />
+            </div>
+            <div class="form-row">
+              <label for="upd-mode-select">Execution Environment</label>
+              <select id="upd-mode-select">
+                <option value="dry-run" selected>Dry-Run Preview Only (Default Safe)</option>
+                <option value="sandbox">Sandbox Spreadsheet Testing</option>
+                <option value="production">Production Client Spreadsheet</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label for="upd-write-access-state">Write Scope Authorization</label>
+              <div class="actions" style="padding-top: 4px;">
+                <span id="upd-write-access-badge" class="pill pill-neutral">Read-only access</span>
+                <button id="btn-upd-enable-write" class="btn-outline btn-compact" type="button">Enable Write Access</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="upd-feedback" class="feedback-banner hidden" role="alert"></div>
+
+          <div class="button-bar">
+            <button id="btn-upd-preview" class="btn-primary" type="button">Generate Update Preview</button>
+            <button id="btn-upd-backup" class="btn-outline" type="button">Create Backup</button>
+            <button id="btn-upd-execute" class="btn-navy" type="button" disabled>Confirm Update</button>
+            <button id="btn-upd-verify" class="btn-outline" type="button" disabled>Verify Updated Sheet</button>
+            <button id="btn-upd-history" class="btn-outline" type="button">View Update History</button>
+            <button id="btn-upd-open-sheet" class="btn-outline" type="button" disabled>Open Original Google Sheet</button>
+            <button id="btn-upd-view-backup" class="btn-outline" type="button" disabled>View Backup</button>
+          </div>
+
+          <label class="checkbox-inline" style="margin-top: 8px;">
+            <input id="upd-confirm-chk" type="checkbox" />
+            I have reviewed the dry-run preview, confirmed row numbers &amp; verified backup, and authorize updating this worksheet.
+          </label>
+        </div>
+
+        <div id="upd-preview-panel" class="status-panel hidden">
+          <h3>Dry-Run Before &amp; After Preview</h3>
+          <div class="metrics-grid">
+            <div class="summary-chip">
+              <span class="summary-label">Target Sheet / Tab</span>
+              <span id="upd-m-target" class="summary-val">-</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Date Column Plan</span>
+              <span id="upd-m-date-plan" class="summary-val">-</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Rank / NA / Skipped</span>
+              <span id="upd-m-counts" class="summary-val">0 / 0 / 0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">SERP / Header Updates</span>
+              <span id="upd-m-serp-hdr" class="summary-val">0 / 0</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Backup Status</span>
+              <span id="upd-m-backup" class="summary-val">Backup required</span>
+            </div>
+            <div class="summary-chip">
+              <span class="summary-label">Structure Status</span>
+              <span id="upd-m-structure" class="summary-val">-</span>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Row #</th>
+                  <th>Keyword</th>
+                  <th>Previous Rank</th>
+                  <th>New Rank</th>
+                  <th>Previous SERP URL</th>
+                  <th>New SERP URL</th>
+                  <th>Update Status</th>
+                </tr>
+              </thead>
+              <tbody id="upd-preview-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="upd-journal-panel" class="status-panel hidden">
+          <h3>Update Operation Journal &amp; Recovery History</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Operation ID</th>
+                  <th>Date</th>
+                  <th>Worksheet</th>
+                  <th>Mode</th>
+                  <th>Status</th>
+                  <th>Backup Ref</th>
+                </tr>
+              </thead>
+              <tbody id="upd-journal-tbody"></tbody>
             </table>
           </div>
         </div>
@@ -1088,11 +1228,16 @@
               <tr>
                 <td>Phase 8</td>
                 <td>Google Sheets authentication, reading &amp; keyword import</td>
+                <td><span class="pill pill-healthy">Completed</span></td>
+              </tr>
+              <tr>
+                <td>Phase 9</td>
+                <td>Google Sheets updating with complete design preservation</td>
                 <td><span class="pill pill-healthy">Current</span></td>
               </tr>
               <tr>
-                <td>Phases 9–12</td>
-                <td>Google Sheets updating, history, scheduling &amp; deployment</td>
+                <td>Phases 10–12</td>
+                <td>Agency history, weekly scheduling &amp; final deployment</td>
                 <td><span class="pill pill-neutral">Pending</span></td>
               </tr>
             </tbody>

@@ -1,8 +1,10 @@
 /**
- * Structure snapshot & fingerprint generator for read-only safety validation.
- * Phase 9 will compare against this snapshot to verify rows/columns have not
- * shifted unexpectedly before performing any live sheet updates.
+ * Structure snapshot & fingerprint generator for read-only and pre-write validation.
+ * Compares headers, keyword rows (added/removed/edited/moved), historical date headers,
+ * merged ranges, formulas, protected ranges, filters, conditional formatting, and user formatting.
  */
+
+import { normalizeWorksheetId } from "./spreadsheet-validator.js";
 
 function computeStableHexHash(input) {
   let h1 = 0xdeadbeef;
@@ -17,15 +19,18 @@ function computeStableHexHash(input) {
   return `${(h2 >>> 0).toString(16).padStart(8, "0")}${(h1 >>> 0).toString(16).padStart(8, "0")}`;
 }
 
-export function createSheetSnapshot({
-  clientId,
-  locationId = null,
-  structure,
-  importedAt = new Date().toISOString(),
-}) {
-  const canonicalPayload = {
+function serializeProtectedRanges(ranges = []) {
+  return ranges.map((p) => ({
+    description: p.description || "",
+    range: p.range || null,
+  }));
+}
+
+function buildStructureMetadataForFingerprint(structure) {
+  const wsId = normalizeWorksheetId(structure.worksheetId);
+  return {
     spreadsheetId: structure.spreadsheetId,
-    worksheetId: String(structure.worksheetId || ""),
+    worksheetId: wsId,
     worksheetName: structure.worksheetName,
     headerRowPositions: [...(structure.headerRowNumbers || [])],
     columnMappings: { ...(structure.columnMappings || {}) },
@@ -41,12 +46,31 @@ export function createSheetSnapshot({
       (m) => `${m.startCol}${m.startRow}:${m.endCol}${m.endRow}`
     ),
     formulaLocations: (structure.formulaCells || []).map((f) => `${f.a1}=${f.formula}`),
+    protectedRanges: serializeProtectedRanges(structure.protectedRanges || []),
+    filterSummary: structure.filterSummary || { hasBasicFilter: Boolean(structure.hasFilter), filterViewsCount: 0 },
+    conditionalFormatsCount: Number(structure.conditionalFormatsCount ?? (structure.conditionalFormats || []).length),
+    conditionalFormats: structure.conditionalFormats || [],
+    formattingSummary: {
+      detectedColors: structure.formattingMetadata?.detectedColors || [],
+      columnWidths: structure.formattingMetadata?.columnWidths || [],
+      templateHeaderFormat: structure.formattingMetadata?.templateHeaderFormat || null,
+      templateDataFormat: structure.formattingMetadata?.templateDataFormat || null,
+    },
   };
+}
 
+export function createSheetSnapshot({
+  clientId,
+  locationId = null,
+  structure,
+  importedAt = new Date().toISOString(),
+}) {
+  const canonicalPayload = buildStructureMetadataForFingerprint(structure);
   const structureFingerprint = computeStableHexHash(JSON.stringify(canonicalPayload));
+  const wsKey = canonicalPayload.worksheetId !== "" ? canonicalPayload.worksheetId : canonicalPayload.worksheetName;
 
   return {
-    snapshotKey: `${clientId}::${structure.spreadsheetId}::${structure.worksheetId || structure.worksheetName}`,
+    snapshotKey: `${clientId}::${structure.spreadsheetId}::${wsKey}`,
     clientId,
     locationId,
     ...canonicalPayload,
@@ -58,53 +82,150 @@ export function createSheetSnapshot({
 }
 
 /**
- * Check whether an imported spreadsheet's structure has drifted since the snapshot
- * was captured (row shifts, keyword edits, moved headers, or column shifts).
+ * Thoroughly compare baseline snapshot with current sheet structure.
+ * Detects added/removed/edited/moved keyword rows, header shifts, column shifts,
+ * historical date header changes, merged ranges, formulas, protected ranges,
+ * filters, conditional formatting, and user-entered formatting changes.
  */
 export function compareSnapshotWithStructure(previousSnapshot, currentStructure) {
   if (!previousSnapshot) {
-    return { safeToUpdate: false, issues: ["No baseline spreadsheet structure snapshot recorded."] };
+    return {
+      safeToUpdate: false,
+      issues: ["No baseline spreadsheet structure snapshot recorded."],
+      diff: null,
+    };
   }
 
+  const currentCanonical = buildStructureMetadataForFingerprint(currentStructure);
   const issues = [];
-  if (previousSnapshot.spreadsheetId !== currentStructure.spreadsheetId) {
+
+  if (previousSnapshot.spreadsheetId !== currentCanonical.spreadsheetId) {
     issues.push("Spreadsheet ID changed.");
   }
-  if (String(previousSnapshot.worksheetId || "") !== String(currentStructure.worksheetId || "")) {
+  if (normalizeWorksheetId(previousSnapshot.worksheetId) !== currentCanonical.worksheetId) {
     issues.push("Worksheet ID changed.");
   }
 
   if (
     JSON.stringify(previousSnapshot.headerRowPositions || []) !==
-    JSON.stringify(currentStructure.headerRowNumbers || [])
+    JSON.stringify(currentCanonical.headerRowPositions || [])
   ) {
     issues.push("Keyword table header row positions changed in the sheet.");
   }
 
   if (
     JSON.stringify(previousSnapshot.columnMappings || {}) !==
-    JSON.stringify(currentStructure.columnMappings || {})
+    JSON.stringify(currentCanonical.columnMappings || {})
   ) {
     issues.push("Spreadsheet column mappings changed.");
   }
 
-  const currentMap = new Map(
-    (currentStructure.keywordRows || []).map((r) => [r.rowNumber, r.keyword])
-  );
-  for (const prevRow of previousSnapshot.keywordRows || []) {
-    const liveKw = currentMap.get(prevRow.rowNumber);
-    if (liveKw === undefined) {
-      issues.push(`Expected keyword '${prevRow.keyword}' missing at row ${prevRow.rowNumber}.`);
-    } else if (liveKw !== prevRow.keyword) {
-      issues.push(
-        `Row ${prevRow.rowNumber} keyword changed from '${prevRow.keyword}' to '${liveKw}'.`
+  if (
+    JSON.stringify(previousSnapshot.historicalDateHeaders || []) !==
+    JSON.stringify(currentCanonical.historicalDateHeaders || [])
+  ) {
+    issues.push("Historical ranking date headers changed unexpectedly.");
+  }
+
+  if (
+    JSON.stringify(previousSnapshot.mergedRanges || []) !==
+    JSON.stringify(currentCanonical.mergedRanges || [])
+  ) {
+    issues.push("Merged cell ranges changed since last snapshot.");
+  }
+
+  if (
+    JSON.stringify(previousSnapshot.formulaLocations || []) !==
+    JSON.stringify(currentCanonical.formulaLocations || [])
+  ) {
+    issues.push("Spreadsheet formula cells changed since last snapshot.");
+  }
+
+  if (
+    JSON.stringify(previousSnapshot.protectedRanges || []) !==
+    JSON.stringify(currentCanonical.protectedRanges || [])
+  ) {
+    issues.push("Protected ranges configuration changed since last snapshot.");
+  }
+
+  if (
+    JSON.stringify(previousSnapshot.filterSummary || {}) !==
+    JSON.stringify(currentCanonical.filterSummary || {})
+  ) {
+    issues.push("Spreadsheet filters changed since last snapshot.");
+  }
+
+  if (
+    Number(previousSnapshot.conditionalFormatsCount ?? 0) !== Number(currentCanonical.conditionalFormatsCount ?? 0) ||
+    JSON.stringify(previousSnapshot.conditionalFormats || []) !==
+      JSON.stringify(currentCanonical.conditionalFormats || [])
+  ) {
+    issues.push("Conditional formatting rules changed since last snapshot.");
+  }
+
+  if (
+    previousSnapshot.formattingSummary &&
+    JSON.stringify(previousSnapshot.formattingSummary) !== JSON.stringify(currentCanonical.formattingSummary)
+  ) {
+    issues.push("Template cell formatting or column widths changed since last snapshot.");
+  }
+
+  const prevByRow = new Map((previousSnapshot.keywordRows || []).map((r) => [r.rowNumber, r]));
+  const currByRow = new Map((currentCanonical.keywordRows || []).map((r) => [r.rowNumber, r]));
+
+  const addedRows = [];
+  const removedRows = [];
+  const editedRows = [];
+  const movedRows = [];
+
+  for (const [rowNum, prevRow] of prevByRow.entries()) {
+    const liveRow = currByRow.get(rowNum);
+    if (!liveRow) {
+      const movedTo = (currentCanonical.keywordRows || []).find(
+        (r) =>
+          !prevByRow.has(r.rowNumber) &&
+          r.keyword === prevRow.keyword &&
+          (r.landingPage || "") === (prevRow.landingPage || "")
       );
+      if (movedTo) {
+        movedRows.push({
+          keyword: prevRow.keyword,
+          previousRow: rowNum,
+          newRow: movedTo.rowNumber,
+        });
+        issues.push(`Keyword '${prevRow.keyword}' moved from row ${rowNum} to row ${movedTo.rowNumber}.`);
+      } else {
+        removedRows.push({ rowNumber: rowNum, keyword: prevRow.keyword });
+        issues.push(`Expected keyword '${prevRow.keyword}' missing/removed at row ${rowNum}.`);
+      }
+    } else if (liveRow.keyword !== prevRow.keyword) {
+      editedRows.push({
+        rowNumber: rowNum,
+        previousKeyword: prevRow.keyword,
+        newKeyword: liveRow.keyword,
+      });
+      issues.push(
+        `Row ${rowNum} keyword changed from '${prevRow.keyword}' to '${liveRow.keyword}'.`
+      );
+    }
+  }
+
+  for (const [rowNum, currRow] of currByRow.entries()) {
+    if (!prevByRow.has(rowNum) && !movedRows.some((m) => m.newRow === rowNum)) {
+      addedRows.push({ rowNumber: rowNum, keyword: currRow.keyword });
+      issues.push(`New keyword '${currRow.keyword}' added at row ${rowNum} since last import.`);
     }
   }
 
   return {
     safeToUpdate: issues.length === 0,
     issues,
+    diff: {
+      addedRows,
+      removedRows,
+      editedRows,
+      movedRows,
+    },
   };
 }
 

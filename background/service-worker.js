@@ -8,9 +8,13 @@ import { createJobStorage } from "../modules/jobs/job-storage.js";
 import { createGeolocationController } from "../modules/location/geolocation-controller.js";
 import { createSingleKeywordChecker } from "../modules/ranking/single-keyword-checker.js";
 import { createGoogleAuthClient } from "../modules/sheets/google-auth.js";
+import { createSheetBackupManager } from "../modules/sheets/sheet-backup-manager.js";
 import { createSheetReader } from "../modules/sheets/sheet-reader.js";
 import { applyConfirmedSheetSync } from "../modules/sheets/sheet-sync.js";
+import { createSheetUpdater } from "../modules/sheets/sheet-updater.js";
 import { createSheetsApiClient } from "../modules/sheets/sheets-api-client.js";
+import { createSheetsWriteClient } from "../modules/sheets/sheets-write-client.js";
+import { createUpdateJournal } from "../modules/sheets/update-journal.js";
 import { createStorageClient, STORAGE_KEYS } from "../modules/storage/storage.js";
 import { buildHealthReport } from "../utils/health.js";
 import { MESSAGE_TYPES } from "../utils/messages.js";
@@ -63,7 +67,20 @@ function getOrCreateServices(chromeApi) {
     storageClient: storage,
   });
   const sheetsApiClient = createSheetsApiClient({ authClient: googleAuthClient });
+  const sheetsWriteClient = createSheetsWriteClient({ authClient: googleAuthClient });
   const sheetReader = createSheetReader({ sheetsApiClient, clientStorage });
+  const sheetBackupManager = createSheetBackupManager({ sheetsApiClient, storageClient: storage });
+  const updateJournal = createUpdateJournal({ clientStorage });
+  const sheetUpdater = createSheetUpdater({
+    authClient: googleAuthClient,
+    sheetReader,
+    sheetsApiClient,
+    sheetsWriteClient,
+    backupManager: sheetBackupManager,
+    updateJournal,
+    clientStorage,
+    locationManager,
+  });
 
   const bundle = {
     storage,
@@ -78,7 +95,11 @@ function getOrCreateServices(chromeApi) {
     clientManager,
     googleAuthClient,
     sheetsApiClient,
+    sheetsWriteClient,
     sheetReader,
+    sheetBackupManager,
+    updateJournal,
+    sheetUpdater,
   };
 
   if (storageArea) {
@@ -108,6 +129,8 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
     clientManager,
     googleAuthClient,
     sheetReader,
+    sheetBackupManager,
+    sheetUpdater,
   } = getOrCreateServices(chromeApi);
 
   switch (message.type) {
@@ -355,6 +378,76 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
         snapshot: message.payload?.snapshot,
         confirmed: Boolean(message.payload?.confirmed),
       });
+
+    // Phase 9 Format-Preserving Google Sheets Updates routes
+    case MESSAGE_TYPES.SHEETS_ENABLE_WRITE:
+      return googleAuthClient.enableWriteAccess({
+        userConfirmed: Boolean(message.payload?.userConfirmed),
+      });
+
+    case MESSAGE_TYPES.SHEETS_DISABLE_WRITE:
+      return googleAuthClient.disableWriteAccess();
+
+    case MESSAGE_TYPES.SHEETS_BACKUP_CREATE: {
+      const p = message.payload || {};
+      return sheetBackupManager.createAndVerifyBackup({
+        clientId: p.clientId,
+        spreadsheetId: p.spreadsheetId,
+        worksheetId: p.worksheetId,
+        worksheetName: p.worksheetName,
+        jobId: p.jobId || null,
+      });
+    }
+
+    case MESSAGE_TYPES.SHEETS_BACKUP_LIST:
+      return {
+        ok: true,
+        backups: await sheetBackupManager.listBackupsForClient(message.payload?.clientId),
+      };
+
+    case MESSAGE_TYPES.SHEETS_UPDATE_PREVIEW: {
+      const p = message.payload || {};
+      const clientJobs = p.clientId ? await clientStorage.listJobsByClient(p.clientId) : [];
+      const job = p.job || clientJobs.find((j) => j.jobId === p.jobId) || clientJobs[0];
+      const allClientResults = p.clientId ? await clientStorage.listResultsByClient(p.clientId) : [];
+      const tasks = p.tasks || (job ? allClientResults.filter((r) => r.jobId === job.jobId) : []);
+      return sheetUpdater.generatePreview({
+        clientId: p.clientId,
+        locationId: p.locationId || null,
+        job,
+        tasks,
+        reportingDate: p.reportingDate || new Date().toISOString().slice(0, 10),
+        explicitHeaderLabel: p.explicitHeaderLabel || "",
+        backupId: p.backupId || null,
+      });
+    }
+
+    case MESSAGE_TYPES.SHEETS_UPDATE_EXECUTE: {
+      const p = message.payload || {};
+      const clientJobs = p.clientId ? await clientStorage.listJobsByClient(p.clientId) : [];
+      const job = p.job || clientJobs.find((j) => j.jobId === p.jobId) || clientJobs[0];
+      const allClientResults = p.clientId ? await clientStorage.listResultsByClient(p.clientId) : [];
+      const tasks = p.tasks || (job ? allClientResults.filter((r) => r.jobId === job.jobId) : []);
+      return sheetUpdater.executeApprovedUpdate({
+        clientId: p.clientId,
+        locationId: p.locationId || null,
+        job,
+        tasks,
+        approvedPreview: p.approvedPreview,
+        approvalConfirmation: Boolean(p.approvalConfirmation),
+        backupId: p.backupId,
+        reportingDate: p.reportingDate || new Date().toISOString().slice(0, 10),
+        explicitHeaderLabel: p.explicitHeaderLabel || "",
+        mode: p.mode || "dry-run",
+        dryRun: p.dryRun !== false,
+      });
+    }
+
+    case MESSAGE_TYPES.SHEETS_UPDATE_JOURNAL_LIST:
+      return {
+        ok: true,
+        journal: await clientStorage.listUpdateJournalByClient(message.payload?.clientId),
+      };
 
     default:
       return { ok: false, error: `Unknown message type: ${message.type}` };

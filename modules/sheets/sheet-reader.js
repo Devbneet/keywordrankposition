@@ -7,7 +7,7 @@ import { buildImportedKeywords, buildSpreadsheetPreview } from "./keyword-import
 import { createSheetSnapshot } from "./sheet-snapshot.js";
 import { detectSheetStructure } from "./sheet-structure-detector.js";
 import { computeSheetSyncDiff } from "./sheet-sync.js";
-import { parseGoogleSheetUrl, resolveTargetWorksheet } from "./spreadsheet-validator.js";
+import { parseGoogleSheetUrl, normalizeWorksheetId, resolveTargetWorksheet } from "./spreadsheet-validator.js";
 
 export function createSheetReader({ sheetsApiClient, clientStorage = null } = {}) {
   if (!sheetsApiClient) {
@@ -27,7 +27,7 @@ export function createSheetReader({ sheetsApiClient, clientStorage = null } = {}
 
     const sheets = metaRes.data?.sheets || [];
     const worksheets = sheets.map((s) => ({
-      sheetId: String(s.properties?.sheetId ?? ""),
+      sheetId: normalizeWorksheetId(s.properties?.sheetId),
       title: String(s.properties?.title || ""),
       index: s.properties?.index ?? 0,
       rowCount: s.properties?.gridProperties?.rowCount ?? 0,
@@ -63,7 +63,7 @@ export function createSheetReader({ sheetsApiClient, clientStorage = null } = {}
       return { ok: false, error: parsed.error };
     }
 
-    const effectiveWorksheetId = String(worksheetId || parsed.gid || "").trim();
+    const effectiveWorksheetId = normalizeWorksheetId(worksheetId) || normalizeWorksheetId(parsed.gid);
     const metaRes = await sheetsApiClient.getSpreadsheetMetadata(parsed.spreadsheetId);
     if (!metaRes.ok) {
       return metaRes;
@@ -103,7 +103,7 @@ export function createSheetReader({ sheetsApiClient, clientStorage = null } = {}
 
     const gridSheet =
       gridRes?.ok && Array.isArray(gridRes.data?.sheets)
-        ? gridRes.data.sheets.find((s) => String(s.properties?.sheetId ?? "") === targetWs.sheetId) || null
+        ? gridRes.data.sheets.find((s) => normalizeWorksheetId(s.properties?.sheetId) === targetWs.sheetId) || null
         : null;
 
     const structure = detectSheetStructure({
@@ -120,8 +120,11 @@ export function createSheetReader({ sheetsApiClient, clientStorage = null } = {}
       hasFilter: Boolean(
         gridSheet?.basicFilter ||
           targetWs.raw?.basicFilter ||
-          (targetWs.raw?.filterViews || []).length > 0
+          (gridSheet?.filterViews || targetWs.raw?.filterViews || []).length > 0
       ),
+      basicFilter: gridSheet?.basicFilter || targetWs.raw?.basicFilter || null,
+      filterViewsCount: (gridSheet?.filterViews || targetWs.raw?.filterViews || []).length,
+      conditionalFormats: gridSheet?.conditionalFormats || targetWs.raw?.conditionalFormats || [],
       gridSheet,
       columnConfig,
     });
@@ -129,7 +132,7 @@ export function createSheetReader({ sheetsApiClient, clientStorage = null } = {}
     const existingKeywords = clientStorage ? await clientStorage.listKeywordsByClient(clientId) : [];
     const existingSnapshots = clientStorage ? await clientStorage.listSheetSnapshotsByClient(clientId) : [];
     const prevSnap = existingSnapshots.find(
-      (s) => s.spreadsheetId === parsed.spreadsheetId && String(s.worksheetId) === targetWs.sheetId
+      (s) => s.spreadsheetId === parsed.spreadsheetId && normalizeWorksheetId(s.worksheetId) === targetWs.sheetId
     ) || null;
 
     const importedKeywords = buildImportedKeywords({
@@ -154,6 +157,8 @@ export function createSheetReader({ sheetsApiClient, clientStorage = null } = {}
       spreadsheetId: parsed.spreadsheetId,
       worksheet: { sheetId: targetWs.sheetId, title: targetWs.title },
       availableWorksheets: wsCheck.availableWorksheets,
+      displayRows,
+      formulaRows,
       structure,
       preview,
       importedKeywords,
