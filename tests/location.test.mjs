@@ -286,16 +286,16 @@ test("detects debugger detachment, tab closure, and revalidates session on reloa
   assert.equal(applied.ok, true);
   const tabId = applied.state.tabId;
 
-  // Simulate debugger detachment event
+    // Simulate debugger detachment event
   const afterDetach = await controller.handleDebuggerDetached({ tabId, reason: "canceled_by_user" });
-  assert.equal(afterDetach.state, LOCATION_STATES.DEBUGGER_DETACHED);
+  assert.equal(afterDetach.state, LOCATION_STATES.DEBUGGER_DISCONNECTED);
   assert.equal(afterDetach.debuggerAttached, false);
 
   // Re-apply then simulate unexpected target drop (e.g., browser/SW restart) without event
   await controller.applyLocation({ latitude: 28.6139, longitude: 77.209 });
   mockChrome._attachedTabs.delete(tabId);
   const revalidatedAfterDrop = await controller.getStatus();
-  assert.equal(revalidatedAfterDrop.state, LOCATION_STATES.DEBUGGER_DETACHED);
+  assert.equal(revalidatedAfterDrop.state, LOCATION_STATES.DEBUGGER_DISCONNECTED);
   assert.equal(revalidatedAfterDrop.debuggerAttached, false);
 
   // Re-apply then simulate tab closure via event and via missing tab during revalidation
@@ -304,7 +304,7 @@ test("detects debugger detachment, tab closure, and revalidates session on reloa
   const afterClose = await controller.handleTabRemoved({ tabId });
   assert.equal(afterClose.tabId, null);
   assert.equal(afterClose.debuggerAttached, false);
-  assert.equal(afterClose.state, LOCATION_STATES.DEBUGGER_DETACHED);
+  assert.equal(afterClose.state, LOCATION_STATES.DEBUGGER_DISCONNECTED);
 });
 
 test("resets location cleanly, clears override, detaches debugger, and preserves config", async () => {

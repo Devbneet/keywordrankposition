@@ -26,7 +26,7 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
         version,
         storageOk: ping.ok,
         checkedAt: ping.checkedAt,
-        notes: ["Phase 2 core ready (background worker, storage, and debugger location controller)."],
+        notes: ["Phase 3 core ready (background worker, storage, GPS & Google location verification)."],
       });
     }
 
@@ -50,7 +50,9 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
     }
 
     case MESSAGE_TYPES.LOCATION_GET_STATUS: {
-      const state = await locationController.getStatus();
+      const state = await locationController.getStatus({
+        reverifyGps: message.payload?.reverifyGps !== false,
+      });
       return { ok: true, state };
     }
 
@@ -70,6 +72,18 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
 
     case MESSAGE_TYPES.LOCATION_RESET: {
       return locationController.resetLocation();
+    }
+
+    case MESSAGE_TYPES.GOOGLE_LOCATION_APPLY: {
+      return locationController.applyGoogleLocation(message.payload || {});
+    }
+
+    case MESSAGE_TYPES.GOOGLE_LOCATION_VERIFY: {
+      return locationController.verifyGoogleLocation(message.payload || {});
+    }
+
+    case MESSAGE_TYPES.GOOGLE_LOCATION_OPEN_SEARCH: {
+      return locationController.openGoogleSearch(message.payload || {});
     }
 
     default:
@@ -113,6 +127,19 @@ if (typeof chrome !== "undefined" && chrome.runtime) {
         await controller.handleTabRemoved({ tabId });
       } catch (error) {
         console.error("Failed handling tab removal:", error);
+      }
+    });
+  }
+
+  if (chrome.tabs?.onUpdated) {
+    chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+      if (!changeInfo?.url) return;
+      try {
+        const storage = createStorageClient(chrome.storage.local);
+        const controller = createGeolocationController({ chromeApi: chrome, storageClient: storage });
+        await controller.handleTabUpdated({ tabId, changeInfo });
+      } catch (error) {
+        console.error("Failed handling tab update:", error);
       }
     });
   }

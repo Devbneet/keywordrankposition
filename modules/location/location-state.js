@@ -1,5 +1,5 @@
 /**
- * Persistent location session state management and live Chrome session revalidation.
+ * Persistent location & Google Search verification state management and live revalidation.
  */
 
 export const LOCATION_STATES = Object.freeze({
@@ -7,14 +7,24 @@ export const LOCATION_STATES = Object.freeze({
   CONFIGURED: "Configured",
   GPS_APPLIED: "GPS applied",
   GPS_VERIFIED: "GPS verified",
+  GOOGLE_MATCHED: "Google location matched",
+  GOOGLE_MISMATCH: "Google location mismatch",
+  GOOGLE_UNAVAILABLE: "Google location unavailable",
   PERMISSION_DENIED: "Permission denied",
   LOCATION_MISMATCH: "Location mismatch",
-  DEBUGGER_DETACHED: "Debugger detached",
+  DEBUGGER_DISCONNECTED: "Debugger disconnected",
+  SEARCH_BLOCKED: "Search blocked",
   VERIFICATION_FAILED: "Verification failed",
 });
 
 export const GOOGLE_LOCATION_STATUSES = Object.freeze({
   UNVERIFIED: "Unverified",
+  MATCHED: "Google location matched",
+  MISMATCH: "Google location mismatch",
+  UNAVAILABLE: "Google location unavailable",
+  SEARCH_BLOCKED: "Search blocked",
+  DEBUGGER_DISCONNECTED: "Debugger disconnected",
+  VERIFICATION_FAILED: "Verification failed",
 });
 
 export const LOCATION_STORAGE_KEY = "dm_location_session";
@@ -22,6 +32,7 @@ export const LOCATION_STORAGE_KEY = "dm_location_session";
 export function createDefaultLocationState() {
   return {
     state: LOCATION_STATES.NOT_CONFIGURED,
+    browserGpsStatus: LOCATION_STATES.NOT_CONFIGURED,
     config: null,
     tabId: null,
     tabUrl: null,
@@ -31,8 +42,64 @@ export function createDefaultLocationState() {
     latitudeDelta: null,
     longitudeDelta: null,
     lastVerifiedAt: null,
-    lastError: null,
     googleLocationStatus: GOOGLE_LOCATION_STATUSES.UNVERIFIED,
+    googleDetectedLocation: null,
+    googleLocationSource: null,
+    googleLocationSourceType: null,
+    googleLastVerifiedAt: null,
+    googleVerificationEvidence: null,
+    lastError: null,
+    warningMessage: null,
+  };
+}
+
+export function normalizeUrlForComparison(url) {
+  if (!url) return "";
+  try {
+    const parsed = new URL(String(url).trim());
+    const pathname = parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/+$/, "");
+    return `${parsed.protocol}//${parsed.host.toLowerCase()}${pathname}${parsed.search}`;
+  } catch {
+    return String(url).trim();
+  }
+}
+
+export function hasConfigChanged(prevConfig, nextConfig) {
+  if (!prevConfig || !nextConfig) return true;
+  const keys = [
+    "locationName",
+    "latitude",
+    "longitude",
+    "accuracy",
+    "targetCity",
+    "country",
+    "language",
+    "googleDomain",
+    "testPageUrl",
+  ];
+  return keys.some((key) => String(prevConfig[key] ?? "") !== String(nextConfig[key] ?? ""));
+}
+
+export function clearVerificationFields(state, { preserveTab = true } = {}) {
+  return {
+    ...state,
+    browserGpsStatus: state.config ? LOCATION_STATES.CONFIGURED : LOCATION_STATES.NOT_CONFIGURED,
+    tabId: preserveTab ? state.tabId : null,
+    tabUrl: preserveTab ? state.tabUrl : null,
+    debuggerAttached: preserveTab ? state.debuggerAttached : false,
+    permissionStatus: "unknown",
+    reportedCoords: null,
+    latitudeDelta: null,
+    longitudeDelta: null,
+    lastVerifiedAt: null,
+    googleLocationStatus: GOOGLE_LOCATION_STATUSES.UNVERIFIED,
+    googleDetectedLocation: null,
+    googleLocationSource: null,
+    googleLocationSourceType: null,
+    googleLastVerifiedAt: null,
+    googleVerificationEvidence: null,
+    lastError: null,
+    warningMessage: null,
   };
 }
 
@@ -45,7 +112,6 @@ export async function loadLocationState(storageClient) {
   return {
     ...createDefaultLocationState(),
     ...saved,
-    googleLocationStatus: GOOGLE_LOCATION_STATUSES.UNVERIFIED,
   };
 }
 
@@ -53,7 +119,6 @@ export async function saveLocationState(storageClient, nextState) {
   const normalized = {
     ...createDefaultLocationState(),
     ...nextState,
-    googleLocationStatus: GOOGLE_LOCATION_STATUSES.UNVERIFIED,
   };
   await storageClient.set({ [LOCATION_STORAGE_KEY]: normalized });
   return normalized;
@@ -61,34 +126,41 @@ export async function saveLocationState(storageClient, nextState) {
 
 /**
  * Revalidate persisted session state against live Chrome tabs & debugger targets.
- * Never assumes a stored override is still active after reload or restart.
+ * Optionally re-verifies live browser GPS coordinates when the debugger is still attached.
  */
-export async function revalidateLocationSession({ state, chromeApi }) {
+export async function revalidateLocationSession({
+  state,
+  chromeApi,
+  reverifyGpsFn = null,
+}) {
   if (!state) {
     return createDefaultLocationState();
   }
 
   if (state.tabId === null || state.tabId === undefined) {
     const baseState = state.config ? LOCATION_STATES.CONFIGURED : LOCATION_STATES.NOT_CONFIGURED;
+    const isTerminalStatus =
+      state.state === LOCATION_STATES.DEBUGGER_DISCONNECTED ||
+      state.state === LOCATION_STATES.PERMISSION_DENIED ||
+      state.state === LOCATION_STATES.VERIFICATION_FAILED ||
+      state.state === LOCATION_STATES.SEARCH_BLOCKED;
+
     return {
       ...state,
       debuggerAttached: false,
-      state:
-        state.state === LOCATION_STATES.DEBUGGER_DETACHED ||
-        state.state === LOCATION_STATES.PERMISSION_DENIED ||
-        state.state === LOCATION_STATES.VERIFICATION_FAILED
-          ? state.state
-          : baseState,
+      browserGpsStatus: isTerminalStatus ? state.browserGpsStatus : baseState,
+      state: isTerminalStatus ? state.state : baseState,
+      googleLocationStatus: GOOGLE_LOCATION_STATUSES.UNVERIFIED,
     };
   }
 
   let tabExists = false;
-  let tabUrl = state.tabUrl;
+  let liveTabUrl = state.tabUrl;
   try {
     const tab = await chromeApi.tabs.get(state.tabId);
     if (tab && tab.id === state.tabId) {
       tabExists = true;
-      tabUrl = tab.url || tabUrl;
+      liveTabUrl = tab.url || liveTabUrl;
     }
   } catch {
     tabExists = false;
@@ -96,17 +168,20 @@ export async function revalidateLocationSession({ state, chromeApi }) {
 
   if (!tabExists) {
     const wasActive = Boolean(state.debuggerAttached);
+    const cleared = clearVerificationFields(state, { preserveTab: false });
     return {
-      ...state,
-      tabId: null,
-      tabUrl: null,
-      debuggerAttached: false,
-      state: wasActive
-        ? LOCATION_STATES.DEBUGGER_DETACHED
+      ...cleared,
+      browserGpsStatus: wasActive
+        ? LOCATION_STATES.DEBUGGER_DISCONNECTED
         : state.config
           ? LOCATION_STATES.CONFIGURED
           : LOCATION_STATES.NOT_CONFIGURED,
-      lastError: wasActive ? "Dedicated test tab was closed." : state.lastError,
+      state: wasActive
+        ? LOCATION_STATES.DEBUGGER_DISCONNECTED
+        : state.config
+          ? LOCATION_STATES.CONFIGURED
+          : LOCATION_STATES.NOT_CONFIGURED,
+      lastError: wasActive ? "Dedicated tab was closed." : state.lastError,
     };
   }
 
@@ -122,19 +197,64 @@ export async function revalidateLocationSession({ state, chromeApi }) {
   }
 
   if (state.debuggerAttached && !stillAttached) {
+    const cleared = clearVerificationFields(
+      { ...state, tabUrl: liveTabUrl, debuggerAttached: false },
+      { preserveTab: true }
+    );
     return {
-      ...state,
-      tabUrl,
-      debuggerAttached: false,
-      state: LOCATION_STATES.DEBUGGER_DETACHED,
-      lastError: "Debugger session disconnected. Re-apply location to resume.",
+      ...cleared,
+      browserGpsStatus: LOCATION_STATES.DEBUGGER_DISCONNECTED,
+      state: LOCATION_STATES.DEBUGGER_DISCONNECTED,
+      lastError: "Debugger disconnected. Re-apply location to resume.",
     };
   }
 
-  return {
-    ...state,
-    tabUrl,
-    debuggerAttached: stillAttached,
-  };
-}
+  // If the tab URL navigated away from the URL recorded during Google verification, invalidate Google verification.
+  let nextState = { ...state, tabUrl: liveTabUrl, debuggerAttached: stillAttached };
+  if (
+    nextState.googleVerificationEvidence?.pageUrl &&
+    liveTabUrl &&
+    normalizeUrlForComparison(liveTabUrl) !==
+    normalizeUrlForComparison(nextState.googleVerificationEvidence.pageUrl)
+  ) {
+    nextState = {
+      ...nextState,
+      googleLocationStatus: GOOGLE_LOCATION_STATUSES.UNVERIFIED,
+      googleDetectedLocation: null,
+      googleLocationSource: null,
+      googleLocationSourceType: null,
+      googleLastVerifiedAt: null,
+      googleVerificationEvidence: null,
+      warningMessage: "Tab URL changed; previous Google location verification was invalidated.",
+    };
+  }
 
+  // Reverify actual GPS coordinates when restoring an attached session.
+  if (stillAttached && nextState.config && typeof reverifyGpsFn === "function") {
+    const verification = await reverifyGpsFn({
+      tabId: nextState.tabId,
+      expectedLatitude: nextState.config.latitude,
+      expectedLongitude: nextState.config.longitude,
+      chromeApi,
+    });
+    const attachedAfterCheck = verification.state !== LOCATION_STATES.DEBUGGER_DISCONNECTED;
+    nextState = {
+      ...nextState,
+      debuggerAttached: attachedAfterCheck,
+      browserGpsStatus: verification.state,
+      permissionStatus: verification.permissionStatus,
+      reportedCoords: verification.reportedCoords,
+      latitudeDelta: verification.latitudeDelta,
+      longitudeDelta: verification.longitudeDelta,
+      lastVerifiedAt: verification.lastVerifiedAt,
+      lastError: verification.lastError,
+      state:
+        verification.state === LOCATION_STATES.GPS_VERIFIED &&
+          nextState.googleLocationStatus !== GOOGLE_LOCATION_STATUSES.UNVERIFIED
+          ? nextState.googleLocationStatus
+          : verification.state,
+    };
+  }
+
+  return nextState;
+}

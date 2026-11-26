@@ -1,8 +1,26 @@
 /**
- * Coordinate validation and paste-parsing utilities using named parameters.
+ * Coordinate validation, country/language/domain presets, and paste-parsing utilities.
  */
 
 export const DEFAULT_ACCURACY_METRES = 20;
+
+export const SUPPORTED_COUNTRIES = Object.freeze({
+  Australia: { code: "au", googleDomain: "google.com.au", defaultLanguage: "en-AU" },
+  "United States": { code: "us", googleDomain: "google.com", defaultLanguage: "en-US" },
+  "United Kingdom": { code: "uk", googleDomain: "google.co.uk", defaultLanguage: "en-GB" },
+  Canada: { code: "ca", googleDomain: "google.ca", defaultLanguage: "en-CA" },
+  India: { code: "in", googleDomain: "google.co.in", defaultLanguage: "en-IN" },
+  "New Zealand": { code: "nz", googleDomain: "google.co.nz", defaultLanguage: "en-NZ" },
+});
+
+export const SUPPORTED_GOOGLE_DOMAINS = Object.freeze([
+  "google.com.au",
+  "google.com",
+  "google.co.uk",
+  "google.ca",
+  "google.co.in",
+  "google.co.nz",
+]);
 
 function isBlank(value) {
   return value === undefined || value === null || String(value).trim() === "";
@@ -14,6 +32,10 @@ function parseFiniteNumber(value) {
   }
   const num = typeof value === "number" ? value : Number(String(value).trim());
   return Number.isFinite(num) ? num : NaN;
+}
+
+export function getCountryPreset(country) {
+  return SUPPORTED_COUNTRIES[String(country || "").trim()] || SUPPORTED_COUNTRIES["United States"];
 }
 
 /**
@@ -50,15 +72,17 @@ export function parseCoordinatePair(rawText) {
 }
 
 /**
- * Validate location configuration fields using named object parameters.
+ * Validate location and Google target configuration using named object parameters.
  */
 export function validateLocationInput({
   locationName = "",
   latitude,
   longitude,
   accuracy = DEFAULT_ACCURACY_METRES,
-  country = "",
+  targetCity = "",
+  country = "Australia",
   language = "",
+  googleDomain = "",
   testPageUrl = "",
 } = {}) {
   const errors = [];
@@ -91,6 +115,15 @@ export function validateLocationInput({
     }
   }
 
+  const cleanCountry = String(country || "Australia").trim() || "Australia";
+  const preset = getCountryPreset(cleanCountry);
+  const cleanDomain = String(googleDomain || preset.googleDomain).trim().toLowerCase();
+  if (!cleanDomain || !cleanDomain.includes("google.")) {
+    errors.push("Google search domain must be a valid Google domain (e.g. google.com.au).");
+  }
+
+  const cleanLanguage = String(language || preset.defaultLanguage).trim() || preset.defaultLanguage;
+
   if (errors.length > 0) {
     return { valid: false, errors };
   }
@@ -102,10 +135,11 @@ export function validateLocationInput({
       latitude: parsedLat,
       longitude: parsedLng,
       accuracy: parsedAccuracy,
-      country: String(country || "").trim(),
-      language: String(language || "").trim(),
+      targetCity: String(targetCity || "").trim(),
+      country: cleanCountry,
+      language: cleanLanguage,
+      googleDomain: cleanDomain,
       testPageUrl: cleanUrl,
     },
   };
 }
-

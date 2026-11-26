@@ -18,7 +18,7 @@
         </div>
         <div class="meta-badges">
           <span class="version-chip">v<span id="dash-version">-</span></span>
-          <span id="dash-phase-chip" class="phase-chip">Phase 2: Geolocation Simulation</span>
+          <span id="dash-phase-chip" class="phase-chip">Phase 3: Google Location Verification</span>
         </div>
       </div>
     </header>
@@ -27,19 +27,26 @@
       <section class="card location-card">
         <div class="card-header">
           <div>
-            <h2>Location Settings</h2>
+            <h2>Location &amp; Google Search Verification</h2>
             <p class="muted">
-              Simulate browser GPS on a dedicated Chrome tab using Chrome Debugger API. Paste
-              <code>-33.8688, 151.2093</code> into Latitude to auto-split coordinates.
+              Shared location settings for Browser GPS (Phase 2) and Google Search Location Verification (Phase 3).
+              Paste <code>-33.8688, 151.2093</code> into Latitude to auto-split.
             </p>
           </div>
           <span id="loc-state-pill" class="pill pill-neutral">Not configured</span>
         </div>
 
         <form id="location-form" class="location-form" novalidate>
-          <div class="form-row full-width">
-            <label for="loc-name">Location name</label>
-            <input id="loc-name" type="text" placeholder="e.g. Sydney CBD" autocomplete="off" />
+          <div class="form-grid-2">
+            <div class="form-row">
+              <label for="loc-name">Location name</label>
+              <input id="loc-name" type="text" placeholder="e.g. Sydney CBD" autocomplete="off" />
+            </div>
+
+            <div class="form-row">
+              <label for="loc-city">Target city</label>
+              <input id="loc-city" type="text" placeholder="e.g. Sydney" autocomplete="off" />
+            </div>
           </div>
 
           <div class="form-grid-2">
@@ -66,38 +73,51 @@
             </div>
           </div>
 
-          <div class="form-grid-3">
+          <div class="form-grid-4">
             <div class="form-row">
               <label for="loc-accuracy">Accuracy (metres)</label>
               <input id="loc-accuracy" type="number" min="1" step="any" value="20" />
             </div>
 
             <div class="form-row">
-              <label for="loc-country">Country</label>
+              <label for="loc-country">Target country</label>
               <select id="loc-country">
                 <option value="Australia">Australia</option>
-                <option value="United Kingdom">United Kingdom</option>
                 <option value="United States">United States</option>
-                <option value="India">India</option>
+                <option value="United Kingdom">United Kingdom</option>
                 <option value="Canada">Canada</option>
-                <option value="Other">Other</option>
+                <option value="India">India</option>
+                <option value="New Zealand">New Zealand</option>
               </select>
             </div>
 
             <div class="form-row">
-              <label for="loc-language">Language</label>
+              <label for="loc-language">Target language</label>
               <select id="loc-language">
                 <option value="en-AU">en-AU (English - Australia)</option>
-                <option value="en-GB">en-GB (English - UK)</option>
                 <option value="en-US">en-US (English - US)</option>
-                <option value="en-IN">en-IN (English - India)</option>
+                <option value="en-GB">en-GB (English - UK)</option>
                 <option value="en-CA">en-CA (English - Canada)</option>
+                <option value="en-IN">en-IN (English - India)</option>
+                <option value="en-NZ">en-NZ (English - New Zealand)</option>
+              </select>
+            </div>
+
+            <div class="form-row">
+              <label for="loc-google-domain">Google search domain</label>
+              <select id="loc-google-domain">
+                <option value="google.com.au">google.com.au</option>
+                <option value="google.com">google.com</option>
+                <option value="google.co.uk">google.co.uk</option>
+                <option value="google.ca">google.ca</option>
+                <option value="google.co.in">google.co.in</option>
+                <option value="google.co.nz">google.co.nz</option>
               </select>
             </div>
           </div>
 
           <div class="form-row full-width">
-            <label for="loc-test-url">Controlled Test Page URL (no automated Google search in Phase 2)</label>
+            <label for="loc-test-url">Controlled Test Page URL (for Browser GPS only)</label>
             <input
               id="loc-test-url"
               type="url"
@@ -108,52 +128,78 @@
 
           <div id="loc-feedback" class="feedback-banner hidden" role="alert"></div>
 
-          <div class="button-bar">
-            <button id="btn-apply-location" class="btn-navy" type="submit">Apply Location</button>
-            <button id="btn-test-location" class="btn-outline" type="button">Test Location</button>
-            <button id="btn-open-test-tab" class="btn-outline" type="button">Open Test Tab</button>
-            <button id="btn-reset-location" class="btn-outline btn-reset" type="button">Reset Location</button>
+          <div class="action-group">
+            <span class="action-group-label">Browser GPS Controls (Phase 2)</span>
+            <div class="button-bar">
+              <button id="btn-apply-location" class="btn-outline" type="submit">Apply Location</button>
+              <button id="btn-test-location" class="btn-outline" type="button">Test Location</button>
+              <button id="btn-open-test-tab" class="btn-outline" type="button">Open Test Tab</button>
+              <button id="btn-reset-location" class="btn-outline btn-reset" type="button">Reset Location</button>
+            </div>
+          </div>
+
+          <div class="action-group google-group">
+            <div class="action-group-header">
+              <span class="action-group-label">Google Search Location (Phase 3)</span>
+              <label class="checkbox-inline">
+                <input id="chk-update-location" type="checkbox" />
+                Click Google's &ldquo;Update location&rdquo; control if shown
+              </label>
+            </div>
+            <div class="button-bar">
+              <button id="btn-apply-google-location" class="btn-navy" type="button">Apply Google Location</button>
+              <button id="btn-verify-google-location" class="btn-outline" type="button">Verify Google Location</button>
+              <button id="btn-open-google-search" class="btn-outline" type="button">Open Google Search</button>
+            </div>
           </div>
         </form>
 
         <div class="status-panel">
-          <h3>Location verification panel</h3>
+          <h3>Verification Dashboard</h3>
           <div class="kv-list">
             <div class="kv-row">
-              <span class="kv-label">Configured coordinates</span>
+              <span class="kv-label">Target location</span>
+              <span id="status-target-location" class="kv-value">Not configured</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Configured latitude and longitude</span>
               <span id="status-configured-coords" class="kv-value">Not configured</span>
             </div>
             <div class="kv-row">
-              <span class="kv-label">Actual reported browser coordinates</span>
+              <span class="kv-label">Actual browser latitude and longitude</span>
               <span id="status-reported-coords" class="kv-value">Not tested</span>
             </div>
             <div class="kv-row">
-              <span class="kv-label">Reported accuracy</span>
-              <span id="status-reported-accuracy" class="kv-value">-</span>
+              <span class="kv-label">Browser GPS verification</span>
+              <span id="status-browser-gps" class="kv-value">Not configured</span>
             </div>
             <div class="kv-row">
-              <span class="kv-label">Active browser tab ID</span>
+              <span class="kv-label">Google-detected location</span>
+              <span id="status-google-detected" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Google location source</span>
+              <span id="status-google-source" class="kv-value">-</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Google location verification status</span>
+              <span id="status-google-location" class="kv-value">Unverified</span>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">Active search tab</span>
               <span id="status-tab-id" class="kv-value">None</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Debugger connection status</span>
-              <span id="status-debugger" class="kv-value">Not connected</span>
-            </div>
-            <div class="kv-row">
-              <span class="kv-label">Location permission status</span>
-              <span id="status-permission" class="kv-value">unknown</span>
             </div>
             <div class="kv-row">
               <span class="kv-label">Last verification time</span>
               <span id="status-last-verified" class="kv-value">-</span>
             </div>
             <div class="kv-row">
-              <span class="kv-label">Google search location verification</span>
-              <span id="status-google-location" class="kv-value">Unverified</span>
+              <span class="kv-label">Error or warning messages</span>
+              <span id="status-errors-warnings" class="kv-value">None</span>
             </div>
           </div>
           <p class="limitation-note">
-            Note: Browser GPS verification confirms <code>navigator.geolocation</code> in the dedicated test tab only. It does not change your public IP address or prove that Google Search uses these coordinates (Google Search location verification will be added in Phase 3).
+            Note: Browser GPS verification (<code>navigator.geolocation</code>), country/language presets, and a city-level footer match on Google Search are reported independently. None of them guarantee exact GPS-based ranking accuracy when Google uses IP address or account signals. Verification stops immediately if Google shows a CAPTCHA or access restriction.
           </p>
         </div>
       </section>
@@ -190,14 +236,14 @@
 
         <article class="card">
           <div class="card-header">
-            <h2>Phase 2 Scope &amp; Guardrails</h2>
+            <h2>Phase 3 Scope &amp; Guardrails</h2>
             <span class="pill pill-healthy">Active</span>
           </div>
           <ul class="checklist">
-            <li>Permissions scoped strictly to <code>storage</code>, <code>tabs</code>, and <code>debugger</code>.</li>
-            <li>Overrides apply only to the dedicated test tab via <code>Emulation.setGeolocationOverride</code>.</li>
-            <li>Session state revalidates live tabs and debugger targets on reload.</li>
-            <li>No automated Google searches, ranking checks, or Sheet edits yet.</li>
+            <li>Dedicated Google Search tab with explicit debugger isolation.</li>
+            <li>Independent Browser GPS vs. Google footer location verification.</li>
+            <li>Automatic invalidation when coordinates, city, domain, or tab URL changes.</li>
+            <li>Immediate halt on CAPTCHA or access restrictions; no ranking or Sheet edits yet.</li>
           </ul>
         </article>
       </section>
@@ -225,12 +271,12 @@
               <tr>
                 <td>Phase 2</td>
                 <td>Browser geolocation simulation (Chrome Debugger API)</td>
-                <td><span class="pill pill-healthy">Current</span></td>
+                <td><span class="pill pill-healthy">Completed</span></td>
               </tr>
               <tr>
                 <td>Phase 3</td>
                 <td>Google search location verification</td>
-                <td><span class="pill pill-neutral">Pending</span></td>
+                <td><span class="pill pill-healthy">Current</span></td>
               </tr>
               <tr>
                 <td>Phase 4</td>

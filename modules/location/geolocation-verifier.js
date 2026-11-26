@@ -10,6 +10,32 @@ export const BROWSER_GPS_LIMITATION_NOTE =
   "Browser GPS verification confirms navigator.geolocation only. It does NOT guarantee Google Search uses these coordinates (Google may use IP address, account, or other signals).";
 
 /**
+ * Validate raw reported coordinates from navigator.geolocation.
+ * Rejects null, blank strings, non-numbers, NaN, Infinity, or out-of-range coordinates.
+ */
+export function validateReportedCoords(probe) {
+  if (!probe || typeof probe !== "object") {
+    return { valid: false, error: "Empty response from browser geolocation probe." };
+  }
+
+  const { latitude, longitude, accuracy } = probe;
+  if (typeof latitude !== "number" || !Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    return { valid: false, error: `Invalid or missing reported latitude: ${String(latitude)}` };
+  }
+  if (typeof longitude !== "number" || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    return { valid: false, error: `Invalid or missing reported longitude: ${String(longitude)}` };
+  }
+  if (typeof accuracy !== "number" || !Number.isFinite(accuracy) || accuracy <= 0) {
+    return { valid: false, error: `Invalid or missing reported accuracy: ${String(accuracy)}` };
+  }
+
+  return {
+    valid: true,
+    coords: { latitude, longitude, accuracy },
+  };
+}
+
+/**
  * Compare expected coordinates against reported coordinates within tolerance.
  */
 export function compareCoordinates({
@@ -94,7 +120,7 @@ export async function verifyBrowserGeolocation({
     const msg = error instanceof Error ? error.message : String(error);
     const detached = /detach|target closed|no tab|not attached/i.test(msg);
     return {
-      state: detached ? LOCATION_STATES.DEBUGGER_DETACHED : LOCATION_STATES.VERIFICATION_FAILED,
+      state: detached ? LOCATION_STATES.DEBUGGER_DISCONNECTED : LOCATION_STATES.VERIFICATION_FAILED,
       permissionStatus: "unknown",
       reportedCoords: null,
       latitudeDelta: null,
@@ -146,29 +172,38 @@ export async function verifyBrowserGeolocation({
     };
   }
 
+  const coordCheck = validateReportedCoords(probe);
+  if (!coordCheck.valid) {
+    return {
+      state: LOCATION_STATES.VERIFICATION_FAILED,
+      permissionStatus: probe.permissionStatus || "granted",
+      reportedCoords: null,
+      latitudeDelta: null,
+      longitudeDelta: null,
+      lastVerifiedAt: checkedAt,
+      lastError: coordCheck.error,
+      limitationNote: BROWSER_GPS_LIMITATION_NOTE,
+    };
+  }
+
   const comparison = compareCoordinates({
     expectedLatitude,
     expectedLongitude,
-    reportedLatitude: probe.latitude,
-    reportedLongitude: probe.longitude,
+    reportedLatitude: coordCheck.coords.latitude,
+    reportedLongitude: coordCheck.coords.longitude,
     toleranceDegrees,
   });
 
   return {
     state: comparison.matches ? LOCATION_STATES.GPS_VERIFIED : LOCATION_STATES.LOCATION_MISMATCH,
     permissionStatus: probe.permissionStatus || "granted",
-    reportedCoords: {
-      latitude: Number(probe.latitude),
-      longitude: Number(probe.longitude),
-      accuracy: Number(probe.accuracy),
-    },
+    reportedCoords: coordCheck.coords,
     latitudeDelta: comparison.latitudeDelta,
     longitudeDelta: comparison.longitudeDelta,
     lastVerifiedAt: checkedAt,
     lastError: comparison.matches
       ? null
-      : `Reported coordinates (${probe.latitude}, ${probe.longitude}) differ from configured (${expectedLatitude}, ${expectedLongitude}).`,
+      : `Reported coordinates (${coordCheck.coords.latitude}, ${coordCheck.coords.longitude}) differ from configured (${expectedLatitude}, ${expectedLongitude}).`,
     limitationNote: BROWSER_GPS_LIMITATION_NOTE,
   };
 }
-
