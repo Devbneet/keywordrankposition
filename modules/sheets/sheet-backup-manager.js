@@ -7,6 +7,8 @@
 
 import { STORES } from "../storage/migrations.js";
 import { createDatabase } from "../storage/database.js";
+import { createSheetSnapshot } from "./sheet-snapshot.js";
+import { detectSheetStructure } from "./sheet-structure-detector.js";
 import { normalizeWorksheetId } from "./spreadsheet-validator.js";
 
 function computeIntegrityHash(obj) {
@@ -229,6 +231,33 @@ export function createSheetBackupManager({
     }
 
     const contentIntegrityHash = computeIntegrityHash(snapshotData);
+    let computedPreWriteFingerprint = preWriteSnapshotFingerprint;
+    if (!computedPreWriteFingerprint) {
+      const detectedStruct = detectSheetStructure({
+        spreadsheetId,
+        spreadsheetTitle: metaRes.data?.properties?.title || "",
+        worksheetId: normalizeWorksheetId(sheetMeta.properties.sheetId),
+        worksheetName: title,
+        locale: metaRes.data?.properties?.locale || "",
+        timeZone: metaRes.data?.properties?.timeZone || "",
+        displayRows: displayValues,
+        formulaRows: formulaValues,
+        merges: snapshotData.merges,
+        protectedRanges: snapshotData.protectedRanges,
+        hasFilter: Boolean(
+          snapshotData.basicFilter || (snapshotData.filterViews || []).length > 0
+        ),
+        basicFilter: snapshotData.basicFilter,
+        filterViewsCount: (snapshotData.filterViews || []).length,
+        conditionalFormats: snapshotData.conditionalFormats,
+        gridSheet,
+      });
+      computedPreWriteFingerprint = createSheetSnapshot({
+        clientId,
+        structure: detectedStruct,
+      }).structureFingerprint;
+    }
+
     const backupId = `sbkp_${clientId}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const record = {
       backupId,
@@ -240,7 +269,7 @@ export function createSheetBackupManager({
       worksheetName: title,
       jobId,
       approvedPlanFingerprint,
-      preWriteSnapshotFingerprint,
+      preWriteSnapshotFingerprint: computedPreWriteFingerprint,
       contentIntegrityHash,
       createdAt: new Date().toISOString(),
       verificationStatus: "VERIFIED",
@@ -285,7 +314,13 @@ export function createSheetBackupManager({
     backupRecord,
     expectedSpreadsheetId,
     expectedWorksheetId,
-    { expectedClientId = null, expectedPlanFingerprint = null, expectedPreWriteFingerprint = null } = {}
+    {
+      expectedClientId = null,
+      expectedPlanFingerprint = null,
+      expectedPreWriteFingerprint = null,
+      requirePlanBinding = false,
+      requirePreWriteBinding = true,
+    } = {}
   ) {
     if (!backupRecord) {
       return { valid: false, error: "Mandatory verified backup is missing." };
@@ -302,25 +337,39 @@ export function createSheetBackupManager({
     if (normalizeWorksheetId(backupRecord.worksheetId) !== normalizeWorksheetId(expectedWorksheetId)) {
       return { valid: false, error: "Backup belongs to a different worksheet ID." };
     }
-    if (
-      expectedPlanFingerprint &&
-      backupRecord.approvedPlanFingerprint &&
-      backupRecord.approvedPlanFingerprint !== expectedPlanFingerprint
-    ) {
-      return { valid: false, error: "Backup does not match the currently approved update plan fingerprint." };
+    if (requirePlanBinding || expectedPlanFingerprint) {
+      if (!backupRecord.approvedPlanFingerprint) {
+        return {
+          valid: false,
+          error: "Backup is missing mandatory approvedPlanFingerprint binding for the current update plan.",
+        };
+      }
+      if (expectedPlanFingerprint && backupRecord.approvedPlanFingerprint !== expectedPlanFingerprint) {
+        return { valid: false, error: "Backup does not match the currently approved update plan fingerprint." };
+      }
     }
-    if (
-      expectedPreWriteFingerprint &&
-      backupRecord.preWriteSnapshotFingerprint &&
-      backupRecord.preWriteSnapshotFingerprint !== expectedPreWriteFingerprint
-    ) {
-      return { valid: false, error: "Backup was captured against an outdated pre-write sheet structure." };
+    if (requirePreWriteBinding || expectedPreWriteFingerprint) {
+      if (!backupRecord.preWriteSnapshotFingerprint) {
+        return {
+          valid: false,
+          error: "Backup is missing mandatory preWriteSnapshotFingerprint binding.",
+        };
+      }
+      if (
+        expectedPreWriteFingerprint &&
+        backupRecord.preWriteSnapshotFingerprint !== expectedPreWriteFingerprint
+      ) {
+        return { valid: false, error: "Backup was captured against an outdated pre-write sheet structure." };
+      }
     }
     if (!hasSufficientRestorationEvidence(backupRecord.snapshotData)) {
       return { valid: false, error: "Backup lacks full recoverable grid formatting and value/formula restoration evidence." };
     }
+    if (!backupRecord.contentIntegrityHash) {
+      return { valid: false, error: "Backup is missing mandatory contentIntegrityHash." };
+    }
     const recomputedHash = computeIntegrityHash(backupRecord.snapshotData);
-    if (backupRecord.contentIntegrityHash && backupRecord.contentIntegrityHash !== recomputedHash) {
+    if (backupRecord.contentIntegrityHash !== recomputedHash) {
       return { valid: false, error: "Backup content integrity check failed (hash mismatch / corrupted snapshot)." };
     }
     return { valid: true };

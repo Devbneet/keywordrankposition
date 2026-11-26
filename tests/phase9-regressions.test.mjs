@@ -258,17 +258,18 @@ test("Phase 9 regression: journal persistence failure blocks initiating a live w
     locationManager,
   });
 
+  const tasks = [
+    { taskId: "t7", rowNumber: 7, rowPosition: 7, keyword: "emergency plumber sydney", status: TASK_STATUSES.RANKED, position: 1, rankingUrl: "https://apexservices.example.com/emergency", isLiveVerified: true },
+  ];
+  const prev = await updater.generatePreview({ clientId: "cli_apex", job: { jobId: "j1", clientId: "cli_apex" }, tasks, reportingDate: "2026-11-30" });
   const bkp = await backupManager.createAndVerifyBackup({
     clientId: "cli_apex",
     spreadsheetId: FICTIONAL_SPREADSHEET_ID,
     worksheetId: FICTIONAL_WORKSHEET_ID,
     worksheetName: FICTIONAL_WORKSHEET_NAME,
+    approvedPlanFingerprint: prev.preview.planFingerprint,
+    preWriteSnapshotFingerprint: prev.snapshot?.structureFingerprint || null,
   });
-
-  const tasks = [
-    { taskId: "t7", rowNumber: 7, rowPosition: 7, keyword: "emergency plumber sydney", status: TASK_STATUSES.RANKED, position: 1, rankingUrl: "https://apexservices.example.com/emergency", isLiveVerified: true },
-  ];
-  const prev = await updater.generatePreview({ clientId: "cli_apex", job: { jobId: "j1", clientId: "cli_apex" }, tasks, reportingDate: "2026-11-30", backupId: bkp.backup.backupId });
   const res = await updater.executeApprovedUpdate({
     clientId: "cli_apex",
     job: { jobId: "j1", clientId: "cli_apex" },

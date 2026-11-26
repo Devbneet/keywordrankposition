@@ -13,6 +13,7 @@ import { createKeywordRankingsPage } from "./pages/keyword-rankings.js";
 import { createOverviewPage } from "./pages/overview.js";
 import { createRankingHistoryPage } from "./pages/ranking-history.js";
 import { createReportsPage } from "./pages/reports.js";
+import { createScheduledChecksPage } from "./pages/scheduled-checks.js";
 import { createSettingsPage } from "./pages/settings.js";
 
 import {
@@ -259,6 +260,7 @@ let rankingHistoryPage;
 let reportsPage;
 let activityLogsPage;
 let settingsPage;
+let scheduledChecksPage;
 let jobsHistoryPage;
 
 function getDashboardStorage() {
@@ -725,19 +727,25 @@ updEnableWriteBtn.addEventListener("click", async () => {
 });
 updModeSelect.addEventListener("change", syncUpdateButtons);
 updConfirmChk.addEventListener("change", syncUpdateButtons);
-updBackupBtn.addEventListener("click", async () => {
-  const c = clientsPage.getActiveWorkspace()?.client;
-  if (!c?.sheetConfig?.spreadsheetId) return;
-  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SHEETS_BACKUP_CREATE, payload: { clientId: c.clientId, spreadsheetId: c.sheetConfig.spreadsheetId, worksheetId: c.sheetConfig.worksheetId, worksheetName: c.sheetConfig.worksheetName, jobId: updJobSelect.value || null } });
-  if (res?.ok) { latestVerifiedBackup = res.backup; setPill(updStatusPillEl, "healthy", "Backup verified"); updMBackupEl.textContent = `Verified (${res.backup.backupId})`; syncUpdateButtons(); }
-  else setBanner(updFeedbackEl, "error", res?.error || "Backup failed.");
-});
-updPreviewBtn.addEventListener("click", async () => {
-  const c = clientsPage.getActiveWorkspace()?.client;
-  if (!c || !updJobSelect.value) return;
-  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SHEETS_UPDATE_PREVIEW, payload: { clientId: c.clientId, locationId: updLocationSelect.value || null, jobId: updJobSelect.value, reportingDate: updDateInput.value, backupId: latestVerifiedBackup?.backupId || null } });
-  if (!res?.ok) return setBanner(updFeedbackEl, "error", res?.errors?.join(" ") || res?.error || "Preview failed.");
-  latestUpdatePreviewState = res.preview;
+  updBackupBtn.addEventListener("click", async () => {
+    const c = clientsPage.getActiveWorkspace()?.client;
+    if (!c?.sheetConfig?.spreadsheetId) return;
+    if (!latestUpdatePreviewState?.planFingerprint) {
+      return setBanner(updFeedbackEl, "error", "Generate the Google Sheet preview first so the recoverable backup binds to the approved write plan.");
+    }
+    const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SHEETS_BACKUP_CREATE, payload: { clientId: c.clientId, spreadsheetId: c.sheetConfig.spreadsheetId, worksheetId: c.sheetConfig.worksheetId, worksheetName: c.sheetConfig.worksheetName, jobId: updJobSelect.value || null, approvedPlanFingerprint: latestUpdatePreviewState.planFingerprint, preWriteSnapshotFingerprint: latestUpdatePreviewState.preWriteSnapshotFingerprint || null } });
+    if (res?.ok) { latestVerifiedBackup = res.backup; setPill(updStatusPillEl, "healthy", "Backup verified"); updMBackupEl.textContent = `Verified (${res.backup.backupId})`; syncUpdateButtons(); }
+    else setBanner(updFeedbackEl, "error", res?.error || "Backup failed.");
+  });
+  updPreviewBtn.addEventListener("click", async () => {
+    const c = clientsPage.getActiveWorkspace()?.client;
+    if (!c || !updJobSelect.value) return;
+    const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SHEETS_UPDATE_PREVIEW, payload: { clientId: c.clientId, locationId: updLocationSelect.value || null, jobId: updJobSelect.value, reportingDate: updDateInput.value, backupId: latestVerifiedBackup?.backupId || null } });
+    if (!res?.ok) return setBanner(updFeedbackEl, "error", res?.errors?.join(" ") || res?.error || "Preview failed.");
+    latestUpdatePreviewState = {
+      ...res.preview,
+      preWriteSnapshotFingerprint: res.snapshot?.structureFingerprint || null,
+    };
   updPreviewPanel.classList.remove("hidden");
   updMTargetEl.textContent = `${res.preview.spreadsheetTitle} / ${res.preview.worksheetName}`;
   updMDatePlanEl.textContent = `${res.preview.willInsertColumn ? "Insert" : "Reuse"} Col ${res.preview.targetColumnLetter}: '${res.preview.reportingDate}'`;
@@ -827,6 +835,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   reportsPage = createReportsPage({ getAccuracyComparisons: () => validationState.comparisonReport?.rows || [] });
   activityLogsPage = createActivityLogsPage();
   settingsPage = createSettingsPage();
+  scheduledChecksPage = createScheduledChecksPage({
+    onOpenSheetsForClient: async (clientId) => {
+      await clientsPage.selectClient(clientId);
+      syncTopbarClientDropdown(clientsPage.getOverviews(), clientId);
+      navCtrl.navigateTo("google-sheets");
+      await refreshGoogleAuthStatus();
+    },
+  });
   jobsHistoryPage = createJobsHistoryPage({ onResumeBulk: () => bulkResumeBtn.click() });
 
   navCtrl = initSidebarNavigation({
@@ -844,6 +860,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       else if (pageId === "reports") reportsPage.refreshClients(ovs);
       else if (pageId === "activity-logs") await activityLogsPage.refresh(ovs);
       else if (pageId === "settings") { await settingsPage.refresh(); await runHealthCheck(); }
+      else if (pageId === "scheduled-checks") await scheduledChecksPage.refresh(ovs);
       else if (pageId === "google-sheets") await refreshGoogleAuthStatus();
     },
   });
@@ -862,6 +879,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await Promise.all([
     overviewPage.refresh(),
+    scheduledChecksPage.refresh(ovRes?.overviews || []),
     refreshGoogleAuthStatus(),
     refreshLocationStatus({ populateInputs: true }),
     refreshRankingState(),

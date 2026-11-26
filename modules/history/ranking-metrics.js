@@ -17,7 +17,13 @@ export function computeAgencyOverviewMetrics({
   todayIso = new Date().toISOString().slice(0, 10),
 } = {}) {
   const activeClients = clients.filter((c) => c.status === "active");
-  const liveHistory = historyRecords.filter((r) => r.sourceMode !== "manual_html");
+  const liveHistory = historyRecords.filter(
+    (r) =>
+      r.sourceMode !== "manual_html" &&
+      r.sourceMode !== "mock" &&
+      !r.isMock &&
+      (isFailedTaskStatus(r.resultStatus || r.status) || r.isLiveVerified === true)
+  );
   const snapshots = buildCurrentAndPreviousSnapshots(liveHistory);
 
   let top3Count = 0;

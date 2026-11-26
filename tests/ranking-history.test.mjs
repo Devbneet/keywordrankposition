@@ -35,7 +35,7 @@ function createInMemoryStorage() {
 }
 
 test("calculateRankingMovement computes Improved, Declined, Unchanged, New, Lost, excludes failed checks, and prevents incompatible comparisons", () => {
-  const base = { clientId: "c1", locationId: "l1", deviceType: "Desktop", requestedDepth: 50 };
+  const base = { clientId: "c1", locationId: "l1", deviceType: "Desktop", requestedDepth: 50, isLiveVerified: true };
 
   assert.equal(
     calculateRankingMovement(

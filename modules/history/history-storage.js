@@ -19,18 +19,34 @@ export const DEFAULT_AGENCY_SETTINGS = Object.freeze({
 
 export function normalizeHistoryRecord(raw = {}) {
   const timestamp = raw.timestamp || raw.checkedAt || new Date().toISOString();
+  const cleanClientId = raw.clientId || "global";
+  const cleanLocId = raw.locationId || raw.locationConfig?.locationId || "loc";
+  const cleanTaskKey =
+    raw.taskId ||
+    raw.keywordId ||
+    (raw.keywordText || raw.keyword
+      ? `${String(raw.keywordText || raw.keyword).trim().toLowerCase().replace(/[^a-z0-9]+/g, "_")}_r${raw.rowNumber ?? raw.rowPosition ?? "x"}`
+      : "");
+  const deterministicResultId =
+    raw.jobId && cleanTaskKey
+      ? `res_${cleanClientId}_${cleanLocId}_${raw.jobId}_${cleanTaskKey}`
+      : null;
+
   const resultId =
     raw.resultId ||
-    `res_${raw.clientId || "global"}_${raw.jobId || "single"}_${raw.taskId || raw.keywordId || Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    deterministicResultId ||
+    `res_${cleanClientId}_${raw.jobId || "single"}_${cleanTaskKey || Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
   const { rawHtml: _discardHtml, ...cleanRaw } = raw;
   const sourceMode =
     cleanRaw.sourceMode ||
     (cleanRaw.useManualHtml || cleanRaw.source === "manual_html"
       ? "manual_html"
-      : cleanRaw.jobId
-        ? "live_bulk"
-        : "live_single");
+      : cleanRaw.isMock || cleanRaw.source === "mock"
+        ? "mock"
+        : cleanRaw.jobId
+          ? "live_bulk"
+          : "live_single");
 
   return {
     resultId,
@@ -71,8 +87,11 @@ export function normalizeHistoryRecord(raw = {}) {
     googleLocationSource: cleanRaw.googleLocationSource || null,
     deviceType: cleanRaw.deviceType || "Desktop",
     sourceMode,
+    isMock: Boolean(cleanRaw.isMock || sourceMode === "mock"),
     isLiveVerified:
-      sourceMode === "manual_html" ? false : Boolean(cleanRaw.isLiveVerified),
+      sourceMode === "manual_html" || sourceMode === "mock" || Boolean(cleanRaw.isMock)
+        ? false
+        : Boolean(cleanRaw.isLiveVerified),
     resultStatus: cleanRaw.resultStatus || cleanRaw.status || TASK_STATUSES.PENDING,
     errorDetails: cleanRaw.errorDetails || null,
     timestamp,

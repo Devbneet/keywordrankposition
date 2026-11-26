@@ -4,14 +4,23 @@ import { createClientStorage } from "../modules/clients/client-storage.js";
 import { createKeywordManager } from "../modules/clients/keyword-manager.js";
 import { createLocationManager } from "../modules/clients/location-manager.js";
 import { createJobManager } from "../modules/jobs/job-manager.js";
+import { JOB_STATES, TASK_STATUSES } from "../modules/jobs/job-state.js";
 import { createJobStorage } from "../modules/jobs/job-storage.js";
 import { createGeolocationController } from "../modules/location/geolocation-controller.js";
 import { createHistoryStorage } from "../modules/history/history-storage.js";
 import { buildCurrentAndPreviousSnapshots, buildKeywordTrendSeries, compareTwoReportingDates } from "../modules/history/ranking-history.js";
 import { computeAgencyOverviewMetrics, computeClientDashboardMetrics } from "../modules/history/ranking-metrics.js";
 import { createActivityLogger, LOG_CATEGORIES } from "../modules/logging/activity-logger.js";
+import { createNotificationManager } from "../modules/notifications/notification-manager.js";
 import { generateAgencyCsvReport } from "../modules/reports/report-generator.js";
+import { RANKING_STATUSES } from "../modules/ranking/ranking-state.js";
 import { createSingleKeywordChecker } from "../modules/ranking/single-keyword-checker.js";
+import { createAlarmController, QUEUE_DRAIN_ALARM_NAME, scheduleIdFromAlarmName } from "../modules/scheduler/alarm-controller.js";
+import { createExecutionQueue } from "../modules/scheduler/execution-queue.js";
+import { createMissedRunRecovery } from "../modules/scheduler/missed-run-recovery.js";
+import { createScheduleManager } from "../modules/scheduler/schedule-manager.js";
+import { createScheduleStorage } from "../modules/scheduler/schedule-storage.js";
+import { createScheduledJobRunner } from "../modules/scheduler/scheduled-job-runner.js";
 import { createGoogleAuthClient } from "../modules/sheets/google-auth.js";
 import { createSheetBackupManager } from "../modules/sheets/sheet-backup-manager.js";
 import { createSheetReader } from "../modules/sheets/sheet-reader.js";
@@ -88,6 +97,123 @@ function getOrCreateServices(chromeApi) {
   });
   const historyStorage = createHistoryStorage({ storageClient: storage });
   const activityLogger = createActivityLogger({ storageClient: storage });
+  const scheduleStorage = createScheduleStorage({ storageClient: storage });
+  const alarmController = createAlarmController({ alarmsApi: chromeApi?.alarms || null });
+  const notificationManager = createNotificationManager({
+    notificationsApi: chromeApi?.notifications || null,
+    scheduleStorage,
+    activityLogger: (evt) => activityLogger.logEvent(evt),
+  });
+  const executionQueue = createExecutionQueue({
+    scheduleStorage,
+    alarmController,
+    hasActiveConflictFn: async () => {
+      if (searchLock.owner) {
+        return { conflict: true, reason: `Active '${searchLock.owner}' ranking operation is in progress.` };
+      }
+      const activeJob = await jobStorage.loadActiveJob();
+      if (activeJob && activeJob.state === JOB_STATES.RUNNING) {
+        return { conflict: true, reason: `Manual bulk job '${activeJob.jobId}' is actively running.` };
+      }
+      return { conflict: false };
+    },
+  });
+  const missedRunRecovery = createMissedRunRecovery({
+    scheduleStorage,
+    alarmController,
+    executionQueue,
+    notificationManager,
+  });
+  const scheduleManager = createScheduleManager({
+    scheduleStorage,
+    alarmController,
+    clientStorage,
+    locationManager,
+    activityLogger: (evt) => activityLogger.logEvent(evt),
+  });
+  const scheduledJobRunner = createScheduledJobRunner({
+    scheduleStorage,
+    alarmController,
+    clientStorage,
+    locationManager,
+    keywordManager,
+    googleAuthClient,
+    sheetReader,
+    sheetUpdater,
+    sheetBackupManager,
+    historyStorage,
+    notificationManager,
+    activityLogger: (evt) => activityLogger.logEvent(evt),
+    verifyLocationForClient: async ({ location }) => {
+      const applyRes = await locationController.applyLocation({
+        locationName: location.locationName,
+        city: location.city,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy || 20,
+        country: location.country,
+        language: location.language,
+        googleDomain: location.googleDomain,
+        resetPrevious: true,
+      });
+      if (!applyRes?.ok) {
+        return { ok: false, stage: "gps", error: applyRes?.error || "Failed applying browser GPS override." };
+      }
+      const testRes = await locationController.testLocation();
+      if (!testRes?.ok) {
+        return { ok: false, stage: "gps", error: testRes?.error || "Browser GPS coordinate verification failed." };
+      }
+      const googleRes = await locationController.verifyGoogleLocation();
+      if (!googleRes?.ok) {
+        return {
+          ok: false,
+          stage: "google_location",
+          error: googleRes?.error || "Google Search location verification failed.",
+        };
+      }
+      return { ok: true };
+    },
+    runKeywordCheck: async ({ client, location, task, job }) => {
+      const prevLockOwner = searchLock.owner;
+      if (!searchLock.owner) searchLock.owner = "bulk";
+      try {
+        const res = await rankingChecker.checkRanking({
+          keyword: task.keyword,
+          websiteDomain: client.websiteDomain,
+          searchDepth: job.searchDepth || 50,
+          deviceType: location.deviceType || job.deviceType || "Desktop",
+          _caller: "bulk",
+        });
+        const r = res?.result || {};
+        const rawSt = r.status;
+        let mappedStatus = TASK_STATUSES.NETWORK_ERROR;
+        if (rawSt === RANKING_STATUSES.RANKED) mappedStatus = TASK_STATUSES.RANKED;
+        else if (rawSt === RANKING_STATUSES.NOT_FOUND) mappedStatus = TASK_STATUSES.NOT_FOUND;
+        else if (rawSt === RANKING_STATUSES.SEARCH_BLOCKED) mappedStatus = TASK_STATUSES.SEARCH_BLOCKED;
+        else if (rawSt === RANKING_STATUSES.PARSING_ERROR) mappedStatus = TASK_STATUSES.PARSING_ERROR;
+        else if (rawSt === RANKING_STATUSES.LOCATION_MISMATCH || rawSt === RANKING_STATUSES.LOCATION_UNVERIFIED) {
+          mappedStatus = TASK_STATUSES.LOCATION_MISMATCH;
+        }
+        return {
+          status: mappedStatus,
+          position: typeof r.position === "number" ? r.position : null,
+          rankingUrl: r.rankingUrl || null,
+          actualResultsChecked: Number(r.checkedResultsCount ?? r.actualResultsChecked ?? 0),
+          browserGpsVerification: r.browserGpsStatus || "Verified",
+          googleLocationVerification: r.googleLocationStatus || "Verified",
+          isLiveVerified:
+            (mappedStatus === TASK_STATUSES.RANKED || mappedStatus === TASK_STATUSES.NOT_FOUND) &&
+            r.isLiveVerified !== false,
+          captchaDetected: mappedStatus === TASK_STATUSES.SEARCH_BLOCKED,
+          locationMismatch: mappedStatus === TASK_STATUSES.LOCATION_MISMATCH,
+          transient: mappedStatus === TASK_STATUSES.NETWORK_ERROR,
+          errorDetails: r.errorDetails || res?.error || null,
+        };
+      } finally {
+        searchLock.owner = prevLockOwner;
+      }
+    },
+  });
 
   const bundle = {
     storage,
@@ -109,6 +235,13 @@ function getOrCreateServices(chromeApi) {
     sheetUpdater,
     historyStorage,
     activityLogger,
+    scheduleStorage,
+    alarmController,
+    notificationManager,
+    executionQueue,
+    missedRunRecovery,
+    scheduleManager,
+    scheduledJobRunner,
   };
 
   if (storageArea) {
@@ -143,6 +276,12 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
     sheetUpdater,
     historyStorage,
     activityLogger,
+    scheduleStorage,
+    alarmController,
+    executionQueue,
+    missedRunRecovery,
+    scheduleManager,
+    scheduledJobRunner,
   } = getOrCreateServices(chromeApi);
 
   switch (message.type) {
@@ -510,6 +649,8 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
         worksheetId: p.worksheetId,
         worksheetName: p.worksheetName,
         jobId: p.jobId || null,
+        approvedPlanFingerprint: p.approvedPlanFingerprint || null,
+        preWriteSnapshotFingerprint: p.preWriteSnapshotFingerprint || null,
       });
     }
 
@@ -767,9 +908,134 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
       };
     }
 
+    // Phase 11 Weekly Scheduling, Alarm Management & Recovery routes
+    case MESSAGE_TYPES.SCHEDULE_SUMMARY:
+      return scheduleManager.getDashboardSummary();
+
+    case MESSAGE_TYPES.SCHEDULES_LIST:
+      return {
+        ok: true,
+        schedules: await scheduleManager.listSchedules(message.payload || {}),
+      };
+
+    case MESSAGE_TYPES.SCHEDULE_CREATE:
+      return scheduleManager.createSchedule(message.payload || {});
+
+    case MESSAGE_TYPES.SCHEDULE_UPDATE: {
+      const p = message.payload || {};
+      return scheduleManager.updateSchedule(p.scheduleId, p.updates || p);
+    }
+
+    case MESSAGE_TYPES.SCHEDULE_TOGGLE: {
+      const p = message.payload || {};
+      return scheduleManager.setScheduleEnabled(p.scheduleId, Boolean(p.enabled));
+    }
+
+    case MESSAGE_TYPES.SCHEDULE_DELETE:
+      return scheduleManager.deleteSchedule(message.payload?.scheduleId);
+
+    case MESSAGE_TYPES.SCHEDULE_RUN_NOW: {
+      const schedule = await scheduleStorage.getSchedule(message.payload?.scheduleId);
+      if (!schedule) {
+        return { ok: false, error: `Schedule '${message.payload?.scheduleId}' not found.` };
+      }
+      const enq = await executionQueue.enqueueOccurrence({
+        schedule,
+        scheduledForAt: new Date().toISOString(),
+        triggerSource: "manual_run_now",
+      });
+      if (!enq.ok) return enq;
+      const drain = await executionQueue.drainQueue({ jobRunner: scheduledJobRunner });
+      return { ok: true, execution: enq.execution, drain };
+    }
+
+    case MESSAGE_TYPES.SCHEDULE_EXECUTIONS_LIST:
+      return {
+        ok: true,
+        executions: await scheduleStorage.listExecutions(message.payload || {}),
+      };
+
+    case MESSAGE_TYPES.SCHEDULE_MISSED_CHECK: {
+      const missedRes = await missedRunRecovery.checkAndHandleMissedRuns();
+      const drain = await executionQueue.drainQueue({ jobRunner: scheduledJobRunner });
+      return { ...missedRes, drain };
+    }
+
+    case MESSAGE_TYPES.SCHEDULE_MISSED_RESOLVE: {
+      const p = message.payload || {};
+      const res = await missedRunRecovery.resolveMissedExecution({
+        executionId: p.executionId,
+        action: p.action || "skip",
+      });
+      if (res.ok && res.action === "queued_for_run") {
+        const drain = await executionQueue.drainQueue({ jobRunner: scheduledJobRunner });
+        return { ...res, drain };
+      }
+      return res;
+    }
+
+    case MESSAGE_TYPES.SCHEDULER_SETTINGS_GET:
+      return {
+        ok: true,
+        settings: await scheduleStorage.loadSchedulerSettings(),
+      };
+
+    case MESSAGE_TYPES.SCHEDULER_SETTINGS_SAVE:
+      return scheduleStorage.saveSchedulerSettings(message.payload || {});
+
+    case MESSAGE_TYPES.SCHEDULE_ALARMS_INSPECT: {
+      const alarms = await alarmController.getAllAlarms();
+      return { ok: true, alarms };
+    }
+
     default:
       return { ok: false, error: `Unknown message type: ${message.type}` };
   }
+}
+
+export async function handleAlarmEvent(alarm, chromeApi = globalThis.chrome) {
+  if (!alarm?.name) return { ok: false, ignored: true };
+  const { scheduleStorage, executionQueue, scheduledJobRunner } = getOrCreateServices(chromeApi);
+
+  if (alarm.name === QUEUE_DRAIN_ALARM_NAME) {
+    return executionQueue.drainQueue({ jobRunner: scheduledJobRunner });
+  }
+
+  const scheduleId = scheduleIdFromAlarmName(alarm.name);
+  if (!scheduleId) {
+    return { ok: true, ignored: true, alarmName: alarm.name };
+  }
+
+  const schedule = await scheduleStorage.getSchedule(scheduleId);
+  if (!schedule || !schedule.enabled) {
+    return { ok: true, ignored: true, reason: "Schedule missing or disabled", scheduleId };
+  }
+
+  const slotIso = schedule.nextScheduledRunAt || new Date(alarm.scheduledTime || Date.now()).toISOString();
+  const enq = await executionQueue.enqueueOccurrence({
+    schedule,
+    scheduledForAt: slotIso,
+    triggerSource: "alarm",
+  });
+  if (!enq.ok) return enq;
+
+  const drainRes = await executionQueue.drainQueue({ jobRunner: scheduledJobRunner });
+  return {
+    ok: true,
+    scheduleId,
+    deduplicated: enq.deduplicated,
+    execution: enq.execution,
+    drain: drainRes,
+  };
+}
+
+export async function reconcileSchedulerOnStartup(chromeApi = globalThis.chrome) {
+  const { scheduleStorage, alarmController, missedRunRecovery, executionQueue, scheduledJobRunner } =
+    getOrCreateServices(chromeApi);
+  const rec = await alarmController.reconcileAlarms({ scheduleStorage });
+  const missed = await missedRunRecovery.checkAndHandleMissedRuns();
+  const drain = await executionQueue.drainQueue({ jobRunner: scheduledJobRunner });
+  return { ok: true, alarmsReconciled: rec, missedRuns: missed, queueDrain: drain };
 }
 
 if (typeof chrome !== "undefined" && chrome.runtime) {
@@ -783,10 +1049,31 @@ if (typeof chrome !== "undefined" && chrome.runtime) {
           version: chrome.runtime.getManifest().version,
         },
       });
+      await reconcileSchedulerOnStartup(chrome);
     } catch (error) {
       console.error("Failed to initialize extension metadata:", error);
     }
   });
+
+  if (chrome.runtime.onStartup) {
+    chrome.runtime.onStartup.addListener(async () => {
+      try {
+        await reconcileSchedulerOnStartup(chrome);
+      } catch (error) {
+        console.error("Failed reconciling schedules on startup:", error);
+      }
+    });
+  }
+
+  if (chrome.alarms?.onAlarm) {
+    chrome.alarms.onAlarm.addListener(async (alarm) => {
+      try {
+        await handleAlarmEvent(alarm, chrome);
+      } catch (error) {
+        console.error("Failed handling Chrome alarm:", error);
+      }
+    });
+  }
 
   if (chrome.debugger?.onDetach) {
     chrome.debugger.onDetach.addListener(async (source, reason) => {

@@ -215,25 +215,28 @@ test("end-to-end sheetUpdater enforces dry-run/sandbox, backup, structure drift 
     },
   ];
 
-  // Enable opt-in write access & capture backup
+  // Enable opt-in write access & follow Preview -> Verified Backup -> Execute workflow
   await authClient.enableWriteAccess({ userConfirmed: true });
-  const bkp = await backupManager.createAndVerifyBackup({
-    clientId: "cli_apex",
-    spreadsheetId: FICTIONAL_SPREADSHEET_ID,
-    worksheetId: FICTIONAL_WORKSHEET_ID,
-    worksheetName: FICTIONAL_WORKSHEET_NAME,
-    jobId: job.jobId,
-  });
 
   const prevRes = await updater.generatePreview({
     clientId: "cli_apex",
     job,
     tasks,
     reportingDate: "2026-11-30",
-    backupId: bkp.backup.backupId,
   });
   assert.equal(prevRes.ok, true);
   assert.equal(prevRes.preview.willInsertColumn, true);
+
+  const bkp = await backupManager.createAndVerifyBackup({
+    clientId: "cli_apex",
+    spreadsheetId: FICTIONAL_SPREADSHEET_ID,
+    worksheetId: FICTIONAL_WORKSHEET_ID,
+    worksheetName: FICTIONAL_WORKSHEET_NAME,
+    jobId: job.jobId,
+    approvedPlanFingerprint: prevRes.preview.planFingerprint,
+    preWriteSnapshotFingerprint: prevRes.snapshot?.structureFingerprint || null,
+  });
+  assert.equal(bkp.ok, true);
 
   // Dry-run mode refuses HTTP writes!
   const dryBlocked = await updater.executeApprovedUpdate({

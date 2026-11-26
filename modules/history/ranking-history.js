@@ -3,8 +3,15 @@
  * Failed/blocked checks stay clearly marked as missing data — never plotted as position 0.
  */
 
-import { TASK_STATUSES } from "../jobs/job-state.js";
+import { isFailedTaskStatus, TASK_STATUSES } from "../jobs/job-state.js";
 import { calculateRankingMovement, isValidComparableResult, MOVEMENT_TYPES } from "./ranking-comparison.js";
+
+function isEligibleLiveHistoryRecord(r) {
+  if (!r || r.sourceMode === "manual_html" || r.sourceMode === "mock" || r.isMock) return false;
+  const st = r.resultStatus || r.status;
+  if (isFailedTaskStatus(st)) return true;
+  return r.isLiveVerified === true;
+}
 
 function recordGroupKey(rec) {
   const rowAnchor = rec.spreadsheetRowRef?.rowNumber ? `r${rec.spreadsheetRowRef.rowNumber}` : "";
@@ -14,7 +21,7 @@ function recordGroupKey(rec) {
 
 export function buildCurrentAndPreviousSnapshots(historyRecords = []) {
   const liveOnly = historyRecords
-    .filter((r) => r.sourceMode !== "manual_html")
+    .filter(isEligibleLiveHistoryRecord)
     .slice()
     .sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
 

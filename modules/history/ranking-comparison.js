@@ -19,7 +19,15 @@ export const MOVEMENT_TYPES = Object.freeze({
 });
 
 export function isValidComparableResult(record) {
-  if (!record || record.sourceMode === "manual_html") return false;
+  if (!record) return false;
+  if (
+    record.sourceMode === "manual_html" ||
+    record.sourceMode === "mock" ||
+    record.isMock
+  ) {
+    return false;
+  }
+  if (record.isLiveVerified !== true) return false;
   const st = record.resultStatus || record.status;
   return st === TASK_STATUSES.RANKED || st === TASK_STATUSES.NOT_FOUND;
 }
@@ -34,11 +42,30 @@ export function calculateRankingMovement(previousRecord, currentRecord) {
   }
 
   const currStatus = currentRecord.resultStatus || currentRecord.status;
-  if (isFailedTaskStatus(currStatus) || currStatus === TASK_STATUSES.PENDING || currStatus === TASK_STATUSES.RUNNING || currentRecord.sourceMode === "manual_html") {
+  if (
+    isFailedTaskStatus(currStatus) ||
+    currStatus === TASK_STATUSES.PENDING ||
+    currStatus === TASK_STATUSES.RUNNING ||
+    currentRecord.sourceMode === "manual_html" ||
+    currentRecord.sourceMode === "mock" ||
+    currentRecord.isMock ||
+    currentRecord.isLiveVerified !== true
+  ) {
+    const reason =
+      currentRecord.sourceMode === "manual_html"
+        ? "Manual HTML (excluded)"
+        : currentRecord.sourceMode === "mock" || currentRecord.isMock
+          ? "Mock / Fixture (excluded)"
+          : !isFailedTaskStatus(currStatus) &&
+              currStatus !== TASK_STATUSES.PENDING &&
+              currStatus !== TASK_STATUSES.RUNNING &&
+              currentRecord.isLiveVerified !== true
+            ? "Unverified result (excluded)"
+            : `${currStatus} (not lost)`;
     return {
       movementType: MOVEMENT_TYPES.FAILED_EXCLUDED,
       delta: null,
-      label: currentRecord.sourceMode === "manual_html" ? "Manual HTML (excluded)" : `${currStatus} (not lost)`,
+      label: reason,
     };
   }
 

@@ -71,7 +71,7 @@ test("manifest.json is valid Manifest V3 with minimum Phase 8 read-only permissi
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Digital Minds Rank Tracker");
-  assert.deepEqual(manifest.permissions, ["storage", "tabs", "debugger", "identity"]);
+  assert.deepEqual(manifest.permissions, ["storage", "tabs", "debugger", "identity", "alarms", "notifications"]);
   assert.deepEqual(manifest.host_permissions, ["https://sheets.googleapis.com/*"]);
   assert.equal(manifest.background.service_worker, "background/service-worker.js");
   assert.equal(manifest.background.type, "module");

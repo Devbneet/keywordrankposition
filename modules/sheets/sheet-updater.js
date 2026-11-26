@@ -123,6 +123,7 @@ export function createSheetUpdater({
       operationStatus: OPERATION_STATES.PREVIEW_GENERATED,
       preview,
       plan: planRes.plan,
+      snapshot: live.snapshot,
       liveStructure: live.structure,
       liveDisplayRows: live.displayRows,
     };
@@ -198,6 +199,8 @@ export function createSheetUpdater({
         expectedClientId: clientId,
         expectedPlanFingerprint: approvedPreview.planFingerprint,
         expectedPreWriteFingerprint: live.snapshot?.structureFingerprint || null,
+        requirePlanBinding: true,
+        requirePreWriteBinding: true,
       }
     );
     if (!backupCheck.valid) {

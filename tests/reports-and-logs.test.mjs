@@ -40,6 +40,7 @@ test("generateAgencyCsvReport creates all 10 report types cleanly with formula i
       resultStatus: TASK_STATUSES.RANKED,
       rankingPosition: 10,
       sourceMode: "live_bulk",
+      isLiveVerified: true,
       timestamp: "2026-11-23T01:00:00.000Z",
     },
     {
@@ -53,6 +54,7 @@ test("generateAgencyCsvReport creates all 10 report types cleanly with formula i
       rankingPosition: 4,
       rankingUrl: "https://acme.com/",
       sourceMode: "live_bulk",
+      isLiveVerified: true,
       timestamp: "2026-11-30T01:00:00.000Z",
     },
     {

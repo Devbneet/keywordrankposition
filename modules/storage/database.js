@@ -45,6 +45,10 @@ function getKeyFieldForStore(storeName) {
       return "logId";
     case STORES.SETTINGS:
       return "key";
+    case STORES.SCHEDULES:
+      return "scheduleId";
+    case STORES.SCHEDULE_EXECUTIONS:
+      return "executionId";
     default:
       return "id";
   }
@@ -156,6 +160,9 @@ export function createDatabase({
       by_timestamp: "timestamp",
       by_source: "sourceMode",
       by_category: "category",
+      by_enabled: "enabled",
+      by_schedule: "scheduleId",
+      by_executionKey: "executionKey",
     };
     const field = fieldMap[indexName] || indexName;
     return all.filter((item) => item?.[field] === indexValue);

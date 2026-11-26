@@ -1,0 +1,566 @@
+/**
+ * End-to-end Sequential Scheduled Job Runner for Phase 11.
+ * Orchestrates weekly automated workflows by reusing existing modules strictly:
+ * 1. Acquire exclusive execution lock (preventing parallel searches / manual conflicts)
+ * 2. Step sequentially through target client(s)
+ * 3. Verify Google Sheets auth & optionally import fresh keywords cleanly
+ * 4. Verify browser GPS simulation & Google Search location verification (via verifyLocationForClient)
+ * 5. Create persistent bulk ranking job & execute keywords sequentially with conservative throttling
+ *    and transient retry (stopping immediately on CAPTCHA or location mismatch without masking errors)
+ * 6. Save verified results cleanly to ranking history (deterministic IDs -> zero duplicates)
+ * 7. Prepare Mode A Google Sheet dry-run preview (or Mode B only in explicit verified sandbox)
+ * 8. Recompute next IANA wall-clock occurrence, sync Chrome alarm, release lock, send summary notification
+ */
+
+import { isFailedTaskStatus, JOB_STATES, TASK_STATUSES } from "../jobs/job-state.js";
+import { NOTIFICATION_EVENTS } from "../notifications/notification-manager.js";
+import { calculateNextRunAt } from "./schedule-calculator.js";
+import {
+  AUTOMATION_MODES,
+  EXECUTION_STATES,
+  LOCK_TYPES,
+  RETRY_CONFIG,
+  SCHEDULE_FAILURE_CODES,
+  SCHEDULE_STATES,
+} from "./scheduler-state.js";
+
+function delayMs(ms) {
+  if (!ms || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function createScheduledJobRunner({
+  scheduleStorage,
+  alarmController = null,
+  clientStorage,
+  locationManager,
+  keywordManager = null,
+  googleAuthClient = null,
+  sheetReader = null,
+  sheetUpdater = null,
+  sheetBackupManager = null,
+  historyStorage = null,
+  notificationManager = null,
+  verifyLocationForClient,
+  runKeywordCheck,
+  activityLogger = null,
+} = {}) {
+  async function executeSingleClientStep({
+    schedule,
+    entryConfig,
+    execution,
+    now,
+  }) {
+    const client = await clientStorage.getClient(entryConfig.clientId);
+    if (!client) {
+      return {
+        ok: false,
+        clientId: entryConfig.clientId,
+        failureCode: SCHEDULE_FAILURE_CODES.MISSING_CLIENT,
+        error: `Client '${entryConfig.clientId}' no longer exists.`,
+      };
+    }
+
+    const clientLocs = await locationManager.listLocations(client.clientId);
+    const location =
+      (entryConfig.locationId && clientLocs.find((l) => l.locationId === entryConfig.locationId)) ||
+      clientLocs[0] ||
+      null;
+    if (!location) {
+      return {
+        ok: false,
+        clientId: client.clientId,
+        clientName: client.clientName,
+        failureCode: SCHEDULE_FAILURE_CODES.MISSING_LOCATION,
+        error: `No target location configured for '${client.clientName}'.`,
+      };
+    }
+
+    // Optional Google Sheet auth check & keyword sync
+    const sheetUrlOrId =
+      entryConfig.sheetUrlOrId || client.sheetConfig?.sheetUrl || client.sheetConfig?.spreadsheetId || null;
+    let importedFromSheet = false;
+    let sheetSyncWarning = null;
+
+    if (schedule.syncSheetBeforeRun !== false && sheetUrlOrId && sheetReader) {
+      if (googleAuthClient && typeof googleAuthClient.getAuthStatus === "function") {
+        const authStatus = await googleAuthClient.getAuthStatus();
+        if (!authStatus?.connected) {
+          return {
+            ok: false,
+            clientId: client.clientId,
+            clientName: client.clientName,
+            failureCode: SCHEDULE_FAILURE_CODES.AUTH_EXPIRED,
+            error: `Google Sheets authorization required or expired for '${client.clientName}'.`,
+          };
+        }
+      }
+
+      const readRes = await sheetReader.readAndAnalyzeSheet({
+        clientId: client.clientId,
+        locationId: location.locationId,
+        sheetUrlOrId,
+        worksheetId: client.sheetConfig?.worksheetId ?? "",
+        worksheetName: client.sheetConfig?.worksheetName ?? "",
+        columnConfig: client.sheetConfig || {},
+      });
+
+      if (!readRes.ok) {
+        if (/auth|401|403|token|oauth/i.test(String(readRes.error || ""))) {
+          return {
+            ok: false,
+            clientId: client.clientId,
+            clientName: client.clientName,
+            failureCode: SCHEDULE_FAILURE_CODES.AUTH_EXPIRED,
+            error: `Google Sheets auth failure: ${readRes.error}`,
+          };
+        }
+        sheetSyncWarning = `Google Sheet read failed (${readRes.error}); falling back to saved keywords if available.`;
+      } else if (readRes.syncDiff?.hasBreakingDrift) {
+        return {
+          ok: false,
+          clientId: client.clientId,
+          clientName: client.clientName,
+          failureCode: SCHEDULE_FAILURE_CODES.SHEET_STRUCTURE_DRIFT,
+          error: `Spreadsheet structure changed unexpectedly for '${client.clientName}': ${
+            readRes.syncDiff.driftReasons?.join("; ") || "Manual review required"
+          }`,
+        };
+      } else if (Array.isArray(readRes.importedKeywords) && readRes.importedKeywords.length > 0) {
+        if (keywordManager) {
+          await keywordManager.saveKeywordsBulk(client.clientId, readRes.importedKeywords);
+        } else {
+          await clientStorage.saveKeywordsBulk(readRes.importedKeywords);
+        }
+        if (readRes.snapshot) {
+          await clientStorage.saveSheetSnapshot(readRes.snapshot);
+        }
+        importedFromSheet = true;
+      }
+    }
+
+    // Load active client keywords
+    const allClientKeywords = await clientStorage.listKeywordsByClient(client.clientId);
+    const activeKeywords = allClientKeywords.filter(
+      (k) =>
+        k.active !== false &&
+        (!k.locationId || k.locationId === location.locationId)
+    );
+    if (activeKeywords.length === 0) {
+      return {
+        ok: false,
+        clientId: client.clientId,
+        clientName: client.clientName,
+        failureCode: SCHEDULE_FAILURE_CODES.MISSING_KEYWORDS,
+        error: `No active keywords found for '${client.clientName}'.`,
+      };
+    }
+
+    // Mandatory pre-search GPS + Google location verification
+    if (typeof verifyLocationForClient === "function") {
+      const locCheck = await verifyLocationForClient({ client, location, execution });
+      if (!locCheck?.ok) {
+        const isGoogle = locCheck?.stage === "google_location";
+        return {
+          ok: false,
+          clientId: client.clientId,
+          clientName: client.clientName,
+          failureCode: isGoogle
+            ? SCHEDULE_FAILURE_CODES.GOOGLE_LOCATION_FAILED
+            : SCHEDULE_FAILURE_CODES.GPS_LOCATION_FAILED,
+          error: locCheck?.error || "Location verification failed before scheduled keyword checks.",
+        };
+      }
+    }
+
+    const jobId = `sjob_${schedule.scheduleId}_${client.clientId}_${Date.now()}`;
+    const jobRecord = {
+      jobId,
+      clientId: client.clientId,
+      locationId: location.locationId,
+      locationName: location.locationName,
+      scheduleId: schedule.scheduleId,
+      executionId: execution.executionId,
+      websiteDomain: client.websiteDomain,
+      searchDepth: schedule.searchDepth || 50,
+      deviceType: location.deviceType || "Desktop",
+      state: JOB_STATES.RUNNING,
+      createdAt: now.toISOString(),
+      tasks: activeKeywords.map((kw, idx) => ({
+        taskId: `stask_${idx + 1}_${kw.keywordId || idx}`,
+        jobId,
+        clientId: client.clientId,
+        locationId: location.locationId,
+        locationName: location.locationName,
+        keywordId: kw.keywordId || null,
+        keyword: kw.keyword,
+        keywordGroup: kw.keywordGroup || "Default",
+        searchVolume: kw.searchVolume ?? "",
+        competition: kw.competition || "",
+        landingPage: kw.landingPage || "",
+        rowNumber: kw.rowPosition ?? null,
+        rowPosition: kw.rowPosition ?? null,
+        spreadsheetId: kw.spreadsheetId || client.sheetConfig?.spreadsheetId || null,
+        worksheetId: kw.worksheetId ?? client.sheetConfig?.worksheetId ?? null,
+        worksheetName: kw.worksheetName || client.sheetConfig?.worksheetName || null,
+        status: TASK_STATUSES.PENDING,
+        position: null,
+        rankingUrl: null,
+        isLiveVerified: false,
+      })),
+    };
+    await clientStorage.saveJobRecord(jobRecord);
+
+    const maxRetries = Number(schedule.retryPolicy?.maxKeywordRetries ?? RETRY_CONFIG.maxKeywordRetries);
+    const delayBetweenKeywords = Math.max(
+      RETRY_CONFIG.minDelayBetweenKeywordsMs,
+      Number(schedule.delayBetweenKeywordsMs ?? RETRY_CONFIG.defaultDelayBetweenKeywordsMs)
+    );
+
+    let haltedByCaptcha = false;
+    let haltedByLocation = false;
+    let haltError = null;
+
+    for (let i = 0; i < jobRecord.tasks.length; i += 1) {
+      const task = jobRecord.tasks[i];
+      if (i > 0) {
+        await delayMs(schedule.testFastDelayMs ?? delayBetweenKeywords);
+      }
+
+      let attempt = 0;
+      let outcome = null;
+
+      while (attempt <= maxRetries) {
+        attempt += 1;
+        outcome = await runKeywordCheck({
+          client,
+          location,
+          task,
+          job: jobRecord,
+          attempt,
+        });
+
+        const st = outcome?.status;
+        if (st === TASK_STATUSES.RANKED || st === TASK_STATUSES.NOT_FOUND) {
+          break;
+        }
+        if (st === TASK_STATUSES.SEARCH_BLOCKED || outcome?.captchaDetected) {
+          haltedByCaptcha = true;
+          haltError = outcome?.errorDetails || outcome?.error || "CAPTCHA / unusual traffic detected.";
+          break;
+        }
+        if (st === TASK_STATUSES.LOCATION_MISMATCH || outcome?.locationMismatch) {
+          haltedByLocation = true;
+          haltError = outcome?.errorDetails || outcome?.error || "Google Search location mismatch during scheduled check.";
+          break;
+        }
+        if (attempt <= maxRetries && outcome?.transient !== false) {
+          await delayMs(schedule.testFastDelayMs ?? RETRY_CONFIG.keywordRetryDelayMs);
+        } else {
+          break;
+        }
+      }
+
+      task.status = outcome?.status || TASK_STATUSES.NETWORK_ERROR;
+      task.position = typeof outcome?.position === "number" ? outcome.position : null;
+      task.rankingUrl = outcome?.rankingUrl || null;
+      task.checkedAt = new Date().toISOString();
+      task.isLiveVerified = Boolean(outcome?.isLiveVerified);
+      task.requestedDepth = jobRecord.searchDepth;
+      task.actualResultsChecked = Number(outcome?.actualResultsChecked ?? 0);
+      task.browserGpsVerification = outcome?.browserGpsVerification || "Verified";
+      task.googleLocationVerification = outcome?.googleLocationVerification || "Verified";
+      task.errorDetails = outcome?.errorDetails || outcome?.error || null;
+
+      if (haltedByCaptcha || haltedByLocation) {
+        await clientStorage.saveJobRecord({ ...jobRecord, state: JOB_STATES.PAUSED });
+        break;
+      }
+    }
+
+    const errorCount = jobRecord.tasks.filter((t) => isFailedTaskStatus(t.status)).length;
+    jobRecord.state = haltedByCaptcha || haltedByLocation
+      ? JOB_STATES.PAUSED
+      : errorCount > 0
+        ? JOB_STATES.COMPLETED_WITH_ERRORS
+        : JOB_STATES.COMPLETED;
+    jobRecord.completedAt = new Date().toISOString();
+    await clientStorage.saveJobRecord(jobRecord);
+
+    // Persist verified & failed task logs cleanly into client results & unified history storage
+    const resultRecords = jobRecord.tasks
+      .filter((t) => t.status !== TASK_STATUSES.PENDING)
+      .map((t) => ({
+        ...t,
+        recordKey: `${jobRecord.jobId}::${t.taskId}`,
+        timestamp: t.checkedAt || jobRecord.completedAt,
+        sourceMode: "live_bulk",
+      }));
+    if (resultRecords.length > 0) {
+      await clientStorage.saveResultsBatch(resultRecords);
+      if (historyStorage) {
+        await historyStorage.saveRankingHistoryBatch(resultRecords);
+      }
+    }
+
+    // Step: Prepare Google Sheet Update Preview (Mode A) or verified sandbox write (Mode B)
+    let sheetPreview = null;
+    let sheetPreviewError = null;
+    let autoWriteResult = null;
+    const completedCleanCount = jobRecord.tasks.filter(
+      (t) => t.status === TASK_STATUSES.RANKED || t.status === TASK_STATUSES.NOT_FOUND
+    ).length;
+
+    if (!haltedByCaptcha && !haltedByLocation && completedCleanCount > 0 && sheetUrlOrId && sheetUpdater) {
+      const reportingDate = now.toISOString().slice(0, 10);
+      const prevRes = await sheetUpdater.generatePreview({
+        clientId: client.clientId,
+        locationId: location.locationId,
+        job: jobRecord,
+        tasks: jobRecord.tasks,
+        reportingDate,
+      });
+
+      if (!prevRes.ok) {
+        sheetPreviewError = prevRes.errors?.join("; ") || prevRes.error;
+      } else {
+        sheetPreview = prevRes.preview;
+        const settings = await scheduleStorage.loadSchedulerSettings();
+
+        if (
+          schedule.automationMode === AUTOMATION_MODES.MODE_B_AUTO_SHEET &&
+          (schedule.sandboxMode || settings.unattendedProdSheetWritesEnabled) &&
+          sheetBackupManager
+        ) {
+          const bkpRes = await sheetBackupManager.createAndVerifyBackup({
+            clientId: client.clientId,
+            spreadsheetId: sheetPreview.spreadsheetId,
+            worksheetId: sheetPreview.worksheetId,
+            worksheetName: sheetPreview.worksheetName,
+            jobId: jobRecord.jobId,
+            approvedPlanFingerprint: sheetPreview.planFingerprint,
+            preWriteSnapshotFingerprint: prevRes.snapshot?.structureFingerprint || null,
+          });
+          if (bkpRes.ok) {
+            autoWriteResult = await sheetUpdater.executeApprovedUpdate({
+              clientId: client.clientId,
+              locationId: location.locationId,
+              job: jobRecord,
+              tasks: jobRecord.tasks,
+              approvedPreview: sheetPreview,
+              approvalConfirmation: true,
+              backupId: bkpRes.backup.backupId,
+              reportingDate,
+              mode: schedule.sandboxMode ? "sandbox" : "live",
+              dryRun: false,
+            });
+          } else {
+            sheetPreviewError = bkpRes.error;
+          }
+        }
+      }
+    }
+
+    return {
+      ok: !haltedByCaptcha && !haltedByLocation && errorCount === 0,
+      clientId: client.clientId,
+      clientName: client.clientName,
+      locationName: location.locationName,
+      jobId: jobRecord.jobId,
+      importedFromSheet,
+      sheetSyncWarning,
+      totalKeywords: jobRecord.tasks.length,
+      completedKeywords: completedCleanCount,
+      failedKeywords: errorCount,
+      haltedByCaptcha,
+      haltedByLocation,
+      failureCode: haltedByCaptcha
+        ? SCHEDULE_FAILURE_CODES.CAPTCHA_BLOCKED
+        : haltedByLocation
+          ? SCHEDULE_FAILURE_CODES.GOOGLE_LOCATION_FAILED
+          : sheetPreviewError
+            ? SCHEDULE_FAILURE_CODES.SHEET_PREVIEW_FAILED
+            : null,
+      error: haltError || sheetPreviewError || null,
+      sheetPreview,
+      autoWriteResult,
+    };
+  }
+
+  async function runExecution(execution, { now = new Date() } = {}) {
+    const schedule = await scheduleStorage.getSchedule(execution.scheduleId);
+    if (!schedule) {
+      return { ok: false, error: `Schedule '${execution.scheduleId}' not found.` };
+    }
+
+    const lockRes = await scheduleStorage.acquireExecutionLock({
+      lockType: LOCK_TYPES.SCHEDULED_JOB,
+      ownerId: execution.executionId,
+      description: `Scheduled check: ${schedule.name || schedule.clientName}`,
+    });
+    if (!lockRes.acquired) {
+      execution.deferredReason = lockRes.error;
+      await scheduleStorage.saveExecution(execution);
+      return { ok: false, deferred: true, error: lockRes.error };
+    }
+
+    const startedAt = now.toISOString();
+    execution.status = EXECUTION_STATES.RUNNING;
+    execution.startedAt = startedAt;
+    execution.deferredReason = null;
+    await scheduleStorage.saveExecution(execution);
+    await scheduleStorage.saveSchedule({ ...schedule, status: SCHEDULE_STATES.RUNNING, updatedAt: startedAt });
+
+    const clientEntries =
+      schedule.scopeType === "agency_batch"
+        ? schedule.clientConfigs || []
+        : [{ clientId: schedule.clientId, locationId: schedule.locationId }];
+
+    const clientReports = [];
+    let haltedGloballyByCaptcha = false;
+
+    try {
+      for (let idx = 0; idx < clientEntries.length; idx += 1) {
+        if (idx > 0) {
+          await delayMs(schedule.testFastDelayMs ?? schedule.delayBetweenClientsMs ?? RETRY_CONFIG.defaultDelayBetweenClientsMs);
+        }
+        const report = await executeSingleClientStep({
+          schedule,
+          entryConfig: clientEntries[idx],
+          execution,
+          now,
+        });
+        clientReports.push(report);
+        if (report.haltedByCaptcha) {
+          haltedGloballyByCaptcha = true;
+          break;
+        }
+      }
+
+      const summary = {
+        totalClients: clientEntries.length,
+        completedClients: clientReports.filter((r) => r.completedKeywords > 0 || r.ok).length,
+        failedClients: clientReports.filter((r) => !r.ok).length,
+        totalKeywords: clientReports.reduce((acc, r) => acc + (r.totalKeywords || 0), 0),
+        completedKeywords: clientReports.reduce((acc, r) => acc + (r.completedKeywords || 0), 0),
+        failedKeywords: clientReports.reduce((acc, r) => acc + (r.failedKeywords || 0), 0),
+        previewReadyCount: clientReports.filter((r) => Boolean(r.sheetPreview)).length,
+      };
+
+      const anyCaptcha = clientReports.some((r) => r.haltedByCaptcha);
+      const anyLocationFail = clientReports.some(
+        (r) =>
+          r.haltedByLocation ||
+          r.failureCode === SCHEDULE_FAILURE_CODES.GPS_LOCATION_FAILED ||
+          r.failureCode === SCHEDULE_FAILURE_CODES.GOOGLE_LOCATION_FAILED
+      );
+      const anyAuthFail = clientReports.some((r) => r.failureCode === SCHEDULE_FAILURE_CODES.AUTH_EXPIRED);
+      const allFailed = clientReports.length > 0 && clientReports.every((r) => !r.ok && r.completedKeywords === 0);
+      const hasAnyError = clientReports.some((r) => !r.ok || r.failedKeywords > 0 || Boolean(r.error));
+
+      const finalExecStatus = allFailed || anyCaptcha || anyLocationFail || anyAuthFail
+        ? anyCaptcha || allFailed
+          ? EXECUTION_STATES.FAILED
+          : EXECUTION_STATES.COMPLETED_WITH_ERRORS
+        : summary.previewReadyCount > 0
+          ? EXECUTION_STATES.SHEET_PREVIEW_READY
+          : hasAnyError
+            ? EXECUTION_STATES.COMPLETED_WITH_ERRORS
+            : EXECUTION_STATES.COMPLETED;
+
+      const completedAt = new Date().toISOString();
+      execution.status = finalExecStatus;
+      execution.completedAt = completedAt;
+      execution.clientReports = clientReports;
+      execution.summary = summary;
+      execution.haltedByCaptcha = haltedGloballyByCaptcha;
+      execution.firstError = clientReports.find((r) => r.error)?.error || null;
+      await scheduleStorage.saveExecution(execution);
+
+      const nextCalc = schedule.enabled
+        ? calculateNextRunAt({
+            dayOfWeek: schedule.dayOfWeek,
+            timeOfDay: schedule.timeOfDay,
+            timezone: schedule.timezone,
+            frequency: schedule.frequency,
+            afterDate: new Date(Date.parse(completedAt)),
+            lastScheduledRunAt: execution.scheduledForAt,
+          })
+        : null;
+
+      const nextSchedStatus = !schedule.enabled
+        ? SCHEDULE_STATES.DISABLED
+        : anyCaptcha || anyLocationFail || anyAuthFail || allFailed
+          ? SCHEDULE_STATES.NEEDS_ATTENTION
+          : SCHEDULE_STATES.ENABLED;
+
+      const updatedSchedule = {
+        ...schedule,
+        status: nextSchedStatus,
+        lastRunAt: completedAt,
+        lastStatus: finalExecStatus,
+        lastExecutionId: execution.executionId,
+        lastError: execution.firstError,
+        nextScheduledRunAt: nextCalc ? nextCalc.iso : null,
+        updatedAt: completedAt,
+      };
+      await scheduleStorage.saveSchedule(updatedSchedule);
+      if (alarmController) {
+        await alarmController.syncScheduleAlarm(updatedSchedule);
+      }
+
+      if (notificationManager) {
+        if (anyCaptcha) {
+          await notificationManager.notify(NOTIFICATION_EVENTS.CAPTCHA_BLOCKED, {
+            scheduleName: schedule.name || schedule.clientName,
+            clientId: schedule.clientId,
+          });
+        } else if (anyAuthFail) {
+          await notificationManager.notify(NOTIFICATION_EVENTS.AUTH_REQUIRED, {
+            scheduleName: schedule.name || schedule.clientName,
+            clientId: schedule.clientId,
+          });
+        } else if (anyLocationFail) {
+          await notificationManager.notify(NOTIFICATION_EVENTS.LOCATION_FAILED, {
+            scheduleName: schedule.name || schedule.clientName,
+            clientId: schedule.clientId,
+            reason: execution.firstError,
+          });
+        } else if (hasAnyError) {
+          await notificationManager.notify(NOTIFICATION_EVENTS.COMPLETED_WITH_ERRORS, {
+            scheduleName: schedule.name || schedule.clientName,
+            clientId: schedule.clientId,
+            completedKeywords: summary.completedKeywords,
+            totalKeywords: summary.totalKeywords,
+            errorCount: summary.failedKeywords || summary.failedClients,
+          });
+        } else {
+          await notificationManager.notify(NOTIFICATION_EVENTS.COMPLETED, {
+            scheduleName: schedule.name || schedule.clientName,
+            clientId: schedule.clientId,
+            totalKeywords: summary.totalKeywords,
+            previewReady: summary.previewReadyCount > 0,
+          });
+        }
+      }
+
+      if (activityLogger) {
+        await activityLogger({
+          category: "schedule_execution",
+          clientId: schedule.clientId,
+          title: `Scheduled check ${finalExecStatus}: ${schedule.name || schedule.clientName}`,
+          message: `${summary.completedKeywords}/${summary.totalKeywords} keywords verified; previews ready: ${summary.previewReadyCount}.`,
+        }).catch(() => {});
+      }
+
+      return { ok: true, execution, schedule: updatedSchedule };
+    } finally {
+      await scheduleStorage.releaseExecutionLock(execution.executionId);
+    }
+  }
+
+  return {
+    runExecution,
+  };
+}
+

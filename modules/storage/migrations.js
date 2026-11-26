@@ -3,7 +3,7 @@
  */
 
 export const DATABASE_NAME = "dm_rank_tracker_db";
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 export const STORES = Object.freeze({
   CLIENTS: "clients",
@@ -17,6 +17,8 @@ export const STORES = Object.freeze({
   RANKING_HISTORY: "ranking_history",
   ACTIVITY_LOGS: "activity_logs",
   SETTINGS: "app_settings",
+  SCHEDULES: "schedules",
+  SCHEDULE_EXECUTIONS: "schedule_executions",
 });
 
 /**
@@ -89,6 +91,20 @@ export function applyIdbMigrations(db, oldVersion, _newVersion) {
       db.createObjectStore(STORES.SETTINGS, { keyPath: "key" });
     }
   }
+  if (oldVersion < 5) {
+    if (!db.objectStoreNames.contains(STORES.SCHEDULES)) {
+      const schedStore = db.createObjectStore(STORES.SCHEDULES, { keyPath: "scheduleId" });
+      schedStore.createIndex("by_client", "clientId", { unique: false });
+      schedStore.createIndex("by_enabled", "enabled", { unique: false });
+    }
+    if (!db.objectStoreNames.contains(STORES.SCHEDULE_EXECUTIONS)) {
+      const execStore = db.createObjectStore(STORES.SCHEDULE_EXECUTIONS, { keyPath: "executionId" });
+      execStore.createIndex("by_schedule", "scheduleId", { unique: false });
+      execStore.createIndex("by_client", "clientId", { unique: false });
+      execStore.createIndex("by_status", "status", { unique: false });
+      execStore.createIndex("by_executionKey", "executionKey", { unique: false });
+    }
+  }
 }
 
 export const DB_SCHEMA_KEY = "dm_db_schema_version";
@@ -106,7 +122,7 @@ export async function ensureFallbackSchema(storageClient, targetVersion = CURREN
     data = {};
   }
 
-  if (currentVersion < 4) {
+  if (currentVersion < targetVersion) {
     for (const storeName of Object.values(STORES)) {
       if (!data[storeName] || typeof data[storeName] !== "object") {
         data[storeName] = {};

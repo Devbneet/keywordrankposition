@@ -994,6 +994,169 @@ tr.target-match-row {
   margin-top: 12px;
 }
 
+/* Phase 11 Weekly Scheduling UI (matching clean agency mockup) */
+.sched-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.sched-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sched-title-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: var(--navy);
+  font-size: 16px;
+}
+
+.sched-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 16px;
+  padding: 6px 0 18px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.sched-kpi-label {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.sched-kpi-val {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.sched-kpi-ok {
+  color: #15803d;
+}
+
+.sched-kpi-alert {
+  color: #b45309;
+}
+
+.sched-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.sched-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sched-item-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.sched-icon-tile {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sched-item-title {
+  font-weight: 700;
+  font-size: 15px;
+  color: #0f172a;
+}
+
+.sched-item-sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.sched-item-freq {
+  font-size: 13.5px;
+  color: #1e293b;
+  margin-top: 4px;
+}
+
+.sched-item-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.sched-status-enabled {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #15803d;
+}
+
+.sched-status-disabled {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.sched-status-attention {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #b45309;
+}
+
+.sched-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sched-missed-box {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #fcd34d;
+  background: #fffbeb;
+}
+
+.sched-limitation-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.sched-batch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+  padding: 6px 0;
+}
+
 @media (max-width: 860px) {
   .sidebar {
     position: fixed;

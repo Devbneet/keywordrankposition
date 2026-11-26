@@ -31,11 +31,10 @@
           <button type="button" class="nav-item" data-nav="reports"><span class="nav-label">Reports</span></button>
           <button type="button" class="nav-item" data-nav="activity-logs"><span class="nav-label">Activity Logs</span></button>
           <button type="button" class="nav-item" data-nav="settings"><span class="nav-label">Settings</span></button>
-          <button type="button" class="nav-item" data-nav="help"><span class="nav-label">Help &amp; Docs</span></button>
-          <button type="button" class="nav-item" data-nav="scheduled-checks" disabled aria-disabled="true">
+          <button type="button" class="nav-item" data-nav="scheduled-checks">
             <span class="nav-label">Scheduled Checks</span>
-            <span class="soon-tag">Phase 11</span>
           </button>
+          <button type="button" class="nav-item" data-nav="help"><span class="nav-label">Help &amp; Docs</span></button>
         </nav>
       </aside>
 
@@ -43,7 +42,7 @@
         <header class="saas-topbar">
           <div>
             <strong style="font-size: 16px;">Digital Minds Rank Tracker</strong>
-            <span id="dash-phase-chip" class="phase-chip" style="margin-left: 8px;">Phase 10 Agency Dashboard</span>
+            <span id="dash-phase-chip" class="phase-chip" style="margin-left: 8px;">Phase 11 Weekly Automation</span>
           </div>
           <div class="topbar-controls">
             <select id="topbar-client-select" class="topbar-client-select" aria-label="Quick client switcher">
@@ -950,6 +949,148 @@
             </section>
           </div>
 
+          <!-- PAGE: SCHEDULED CHECKS (PHASE 11) -->
+          <div class="page-view hidden" data-page="scheduled-checks">
+            <section class="card">
+              <div class="sched-header">
+                <div class="sched-title-wrap">
+                  <span class="sched-title-icon" aria-hidden="true">&#128197;</span>
+                  <div>
+                    <h2 style="margin: 0;">Scheduled Ranking Checks</h2>
+                    <p class="muted" style="margin: 4px 0 0;">Automated weekly client &amp; multi-client schedules via Chrome Alarms API with Google Sheet review previews.</p>
+                  </div>
+                </div>
+                <div class="actions">
+                  <button id="btn-sched-check-missed" class="btn-outline btn-compact" type="button">Check Missed Runs</button>
+                  <button id="btn-sched-new" class="btn-navy btn-compact" type="button">+ New Schedule</button>
+                </div>
+              </div>
+
+              <div class="sched-kpi-strip">
+                <div class="sched-kpi-cell">
+                  <div class="sched-kpi-label">Active schedules</div>
+                  <div id="sched-kpi-active" class="sched-kpi-val">0</div>
+                </div>
+                <div class="sched-kpi-cell">
+                  <div class="sched-kpi-label">Upcoming</div>
+                  <div id="sched-kpi-upcoming" class="sched-kpi-val">0</div>
+                </div>
+                <div class="sched-kpi-cell">
+                  <div class="sched-kpi-label">Needs attention</div>
+                  <div id="sched-kpi-attention" class="sched-kpi-val sched-kpi-ok">0</div>
+                </div>
+              </div>
+
+              <div id="sched-feedback" class="feedback-banner hidden" role="alert"></div>
+
+              <div id="sched-missed-panel" class="sched-missed-box hidden">
+                <div class="action-group-header">
+                  <strong style="color: #92400e;">Missed Runs Requiring Action</strong>
+                  <span class="muted">Chrome was unavailable during scheduled window(s) — select whether to execute the latest missed slot or skip.</span>
+                </div>
+                <div class="table-wrap" style="margin-top: 8px;">
+                  <table>
+                    <thead><tr><th>Schedule</th><th>Missed Slot (UTC)</th><th>Missed Count</th><th>Status</th><th>Action</th></tr></thead>
+                    <tbody id="sched-missed-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div id="sched-list" class="sched-list"></div>
+
+              <div class="sched-limitation-note">
+                <span aria-hidden="true">&#9432;</span>
+                <span>Scheduled checks require Chrome to be running and the necessary access permissions to be available.</span>
+              </div>
+            </section>
+
+            <!-- Create / Edit Schedule Drawer -->
+            <section id="sched-editor-panel" class="card hidden">
+              <div class="card-header">
+                <h2 id="sched-editor-title">Create Scheduled Ranking Check</h2>
+                <button id="btn-sched-cancel" class="btn-outline btn-compact" type="button">Cancel</button>
+              </div>
+              <form id="sched-form" class="location-form" novalidate>
+                <input id="sched-id" type="hidden" />
+                <div class="form-grid-2">
+                  <div class="form-row"><label for="sched-name">Schedule Name</label><input id="sched-name" type="text" placeholder="Monday Morning Sydney Checks" /></div>
+                  <div class="form-row"><label for="sched-scope">Schedule Type</label><select id="sched-scope"><option value="single_client">Single Client</option><option value="agency_batch">Agency-Wide Sequential Batch</option></select></div>
+                </div>
+
+                <div id="sched-single-client-group" class="form-grid-2">
+                  <div class="form-row"><label for="sched-client">Client</label><select id="sched-client"></select></div>
+                  <div class="form-row"><label for="sched-location">Target Location</label><select id="sched-location"></select></div>
+                </div>
+
+                <div id="sched-agency-batch-group" class="action-group hidden">
+                  <div class="action-group-header"><span class="action-group-label">Clients Included in Sequential Batch</span></div>
+                  <div id="sched-batch-clients-list" class="sched-batch-grid"></div>
+                </div>
+
+                <div class="form-grid-3">
+                  <div class="form-row"><label for="sched-frequency">Frequency</label><select id="sched-frequency"><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 Weeks</option><option value="daily">Daily</option></select></div>
+                  <div class="form-row"><label for="sched-day">Day of Week</label><select id="sched-day"><option value="1" selected>Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></div>
+                  <div class="form-row"><label for="sched-time">Run Time (Local 24h)</label><input id="sched-time" type="time" value="09:00" /></div>
+                </div>
+
+                <div class="form-grid-3">
+                  <div class="form-row"><label for="sched-timezone">IANA Timezone (DST-Safe)</label><select id="sched-timezone"><option value="Australia/Sydney" selected>Australia/Sydney (AEST/AEDT)</option><option value="Australia/Melbourne">Australia/Melbourne</option><option value="Australia/Brisbane">Australia/Brisbane</option><option value="Australia/Perth">Australia/Perth</option><option value="Europe/London">Europe/London</option><option value="America/New_York">America/New_York</option><option value="America/Los_Angeles">America/Los_Angeles</option><option value="UTC">UTC</option></select></div>
+                  <div class="form-row"><label for="sched-missed-policy">Missed Run Policy</label><select id="sched-missed-policy"><option value="ask_user" selected>Ask User (Recommended)</option><option value="run_latest">Run Latest Missed Automatically</option><option value="skip">Skip Missed Run</option><option value="resume_next">Resume Next Cycle Silently</option></select></div>
+                  <div class="form-row"><label for="sched-depth">Search Depth</label><select id="sched-depth"><option value="20">20</option><option value="50" selected>50</option><option value="100">100</option></select></div>
+                </div>
+
+                <div class="form-grid-2">
+                  <div class="form-row"><label for="sched-delay-ms">Delay Between Keywords (ms, min 2000)</label><input id="sched-delay-ms" type="number" min="2000" step="500" value="3500" /></div>
+                  <div class="form-row"><label for="sched-mode">Sheet Automation Mode</label><select id="sched-mode"><option value="mode_a_check_with_review" selected>Mode A: Check Rankings &amp; Prepare Sheet Preview for Review</option><option value="mode_b_auto_sheet_update" disabled>Mode B: Unattended Live Sheet Update (Disabled until Phase 12)</option></select></div>
+                </div>
+
+                <div class="actions">
+                  <label class="checkbox-inline"><input id="sched-sync-sheet" type="checkbox" checked /> Import latest keywords from Google Sheet before checking</label>
+                  <label class="checkbox-inline"><input id="sched-enabled" type="checkbox" checked /> Enable schedule immediately</label>
+                </div>
+
+                <div class="button-bar" style="margin-top: 10px;">
+                  <button class="btn-navy" type="submit">Save Schedule &amp; Register Chrome Alarm</button>
+                </div>
+              </form>
+            </section>
+
+            <!-- Upcoming, History & Notification Preferences -->
+            <section class="card">
+              <h3>Upcoming Runs (Next 7 Days)</h3>
+              <div class="table-wrap" style="margin-bottom: 18px;">
+                <table>
+                  <thead><tr><th>Schedule</th><th>Cadence</th><th>Timezone</th><th>Next Scheduled Time (UTC)</th></tr></thead>
+                  <tbody id="sched-upcoming-tbody"></tbody>
+                </table>
+              </div>
+
+              <h3>Recent Execution Reports &amp; Failure Diagnostics</h3>
+              <div class="table-wrap" style="margin-bottom: 18px;">
+                <table>
+                  <thead><tr><th>Schedule</th><th>Executed</th><th>Trigger</th><th>Status</th><th>Keywords</th><th>Notes / Errors</th><th>Action</th></tr></thead>
+                  <tbody id="sched-executions-tbody"></tbody>
+                </table>
+              </div>
+
+              <div class="action-group">
+                <div class="action-group-header">
+                  <span class="action-group-label">Chrome Notifications &amp; Alarm Status</span>
+                  <span id="sched-alarms-status" class="muted">Active Chrome Alarms: 0</span>
+                </div>
+                <div class="actions" style="flex-wrap: wrap;">
+                  <label class="checkbox-inline"><input id="notif-enabled" type="checkbox" checked /> Enable desktop notifications</label>
+                  <label class="checkbox-inline"><input id="notif-completed" type="checkbox" checked /> Completed reports</label>
+                  <label class="checkbox-inline"><input id="notif-errors" type="checkbox" checked /> Completed with errors</label>
+                  <label class="checkbox-inline"><input id="notif-missed" type="checkbox" checked /> Missed schedules</label>
+                  <label class="checkbox-inline"><input id="notif-auth" type="checkbox" checked /> OAuth expired</label>
+                  <label class="checkbox-inline"><input id="notif-captcha" type="checkbox" checked /> CAPTCHA / Location halt</label>
+                  <button id="btn-sched-save-prefs" class="btn-outline btn-compact" type="button">Save Notification Preferences</button>
+                </div>
+              </div>
+            </section>
+          </div>
+
           <!-- PAGE: HELP & DOCS -->
           <div class="page-view hidden" data-page="help">
             <section class="card">
@@ -966,9 +1107,9 @@
                 <table>
                   <thead><tr><th>Phase</th><th>Milestone</th><th>Status</th></tr></thead>
                   <tbody>
-                    <tr><td>Phases 1–9</td><td>Extension core, geolocation, Google verification, ranking, Accuracy Lab, bulk jobs, multi-client &amp; Google Sheets read/write</td><td><span class="pill pill-healthy">Completed</span></td></tr>
-                    <tr><td>Phase 10</td><td>Agency SaaS dashboard, historical database, charts, reports &amp; logging</td><td><span class="pill pill-healthy">Current</span></td></tr>
-                    <tr><td>Phase 11–12</td><td>Weekly scheduling, final QA &amp; agency deployment</td><td><span class="pill pill-neutral">Pending</span></td></tr>
+                    <tr><td>Phases 1–10</td><td>Extension core, geolocation, Google verification, ranking, Accuracy Lab, bulk jobs, multi-client, Google Sheets sync/update, SaaS dashboard &amp; historical tracking</td><td><span class="pill pill-healthy">Completed</span></td></tr>
+                    <tr><td>Phase 11</td><td>Weekly Chrome Alarms scheduling, DST timezone engine, missed-run recovery, execution queue &amp; notifications</td><td><span class="pill pill-healthy">Current</span></td></tr>
+                    <tr><td>Phase 12</td><td>Final QA, Sandbox Mode B verification &amp; agency deployment</td><td><span class="pill pill-neutral">Pending</span></td></tr>
                   </tbody>
                 </table>
               </div>
