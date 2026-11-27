@@ -1,66 +1,46 @@
 # Digital Minds Rank Tracker (Chrome Extension)
 
-An internal, 100% free **Chrome Extension (Manifest V3)** for **Digital Minds** to check location-specific organic keyword rankings and update client Google Sheets while preserving all spreadsheet formatting and history.
+An internal, 100% free **Chrome Extension (Manifest V3)** (`v1.0.0-rc.1`) for **Digital Minds** to check location-specific organic keyword rankings, validate accuracy against GS Location Changer, manage multiple SEO clients, schedule weekly checks, and update client Google Sheets while preserving all spreadsheet formatting and history.
 
-## Phase 1 Status
+> **Branch Policy:** Active extension development is on `extension-development`. The legacy Python/Playwright implementation is preserved on `backup/python-version`.
 
-**Phase 1: Clean previous Python project and initialize Chrome extension** — Complete (ready for manual unpacked extension verification in Chrome).
+---
 
-> Note: The previous Python/Playwright implementation is preserved safely on the `backup/python-version` branch.
+## Key Features (Phases 1–12)
 
-## Folder Structure
+- **Browser Geolocation Simulation (`chrome.debugger`):** Sets exact latitude/longitude/accuracy on a dedicated verification tab and verifies `navigator.geolocation` output.
+- **Google Search Location Verification:** Verifies Google's displayed location (`Device-Based` vs `IP-Based`) and blocks live checks on mismatch or CAPTCHA.
+- **Accurate Organic Ranking Detection:** Parses organic SERP results while excluding ads, shopping, AI Overviews, local packs, PAA, and carousels; distinguishes `Ranked`, `Not Found`, and `Incomplete`.
+- **Ranking Accuracy Lab:** Compares extension rankings against GS Location Changer manual baselines with CSV/JSON export.
+- **Bulk Keyword Automation & Job Recovery:** Sequential keyword queues with Pause/Resume/Stop, immediate per-keyword persistence, and interrupted-job recovery.
+- **Multi-Client Isolation:** Independent client domains, target locations, keyword lists, ranking history, and Google Sheet mappings.
+- **Google Sheets Integration (Read & Design-Preserving Updates):** Official Sheets API OAuth 2.0 (`spreadsheets.readonly` by default; opt-in write scope), full local backups, `Mode A` update previews, atomic `InsertDimension` + `CopyPaste(PASTE_FORMAT)` updates, and post-update verification.
+- **Weekly Scheduling & Notifications:** `chrome.alarms` weekly/biweekly scheduling with DST-safe timezone math, missed-run recovery, and conflict deferral.
 
-```text
-keywordrankposition/
-├── manifest.json               # Chrome Extension Manifest V3 configuration
-├── package.json                # Node.js native test runner configuration
-├── README.md                   # Setup, testing, and Chrome loading guide
-├── ROADMAP.md                  # 12-phase development roadmap
-├── SHEET_REQUIREMENTS.md       # Non-negotiable Google Sheet preservation rules
-├── ARCHITECTURE.md             # Extension architecture & design principles
-├── .gitignore                  # Ignores credentials, local exports, OS/IDE files
-├── background/
-│   └── service-worker.js       # MV3 background service worker
-├── popup/
-│   ├── popup.html              # Extension popup UI
-│   ├── popup.css
-│   └── popup.js
-├── dashboard/
-│   ├── dashboard.html          # Agency workspace page
-│   ├── dashboard.css
-│   └── dashboard.js
-├── content/
-│   └── search-content.js       # Content script placeholder (Phases 3-4)
-├── modules/
-│   ├── location/               # Geolocation simulation (Phase 2)
-│   ├── ranking/                # Organic rank detection (Phases 4-5)
-│   ├── sheets/                 # Google Sheets reader & updater (Phases 8-9)
-│   ├── clients/                # Multi-client config (Phase 7)
-│   ├── jobs/                   # Bulk job & pause/resume (Phase 6)
-│   └── storage/
-│       └── storage.js          # chrome.storage.local wrapper & health ping
-├── utils/
-│   ├── health.js               # Standardized health report builder
-│   └── messages.js             # Popup <-> service worker message constants
-├── icons/                      # Extension icons (16, 32, 48, 128 px)
-├── tests/
-│   └── smoke.test.mjs          # Node.js native smoke tests
-└── docs/
-```
+---
 
-## Running Automated Tests
+## Documentation
 
-Requires Node.js 20+ (no external packages needed):
+- [Installation Guide](./docs/INSTALLATION_GUIDE.md) (Unpacked Chrome installation)
+- [User Guide](./docs/USER_GUIDE.md)
+- [Google Cloud & OAuth Setup](./docs/GOOGLE_CLOUD_SETUP.md)
+- [Google Sheets Sandbox Testing](./docs/GOOGLE_SHEETS_SANDBOX_TESTING.md)
+- [Manual Location Test Cases (5 Cities)](./docs/MANUAL_LOCATION_TEST_CASES.md)
+- [Ranking Accuracy Test Plan](./docs/RANKING_ACCURACY_TEST_PLAN.md)
+- [Scheduling Guide](./docs/SCHEDULING_GUIDE.md)
+- [Troubleshooting](./docs/TROUBLESHOOTING.md)
+- [Known Limitations](./docs/KNOWN_LIMITATIONS.md)
+- [Deployment Guide (`v1.0.0-rc.1`)](./docs/DEPLOYMENT_GUIDE.md)
+- [Final Testing Checklist](./docs/FINAL_TESTING_CHECKLIST.md)
+- [Final Test Report](./docs/FINAL_TEST_REPORT.md)
+
+---
+
+## Running Automated Tests & Building Release Package
+
+Requires Node.js 20+ (zero external npm dependencies):
 
 ```powershell
 node --test tests/*.test.mjs
+node scripts/package-release.mjs
 ```
-
-## Loading the Extension in Google Chrome
-
-1. Open Google Chrome and navigate to `chrome://extensions`.
-2. Turn **Developer mode** ON (top-right toggle).
-3. Click **Load unpacked**.
-4. Select `C:\Users\harsh\Documents\KeywordRankPosition`.
-5. Confirm **Digital Minds Rank Tracker** (`v0.1.0`) appears with no manifest errors.
-6. Click the extension icon in the Chrome toolbar to open the popup, confirm **Extension Health: Healthy**, and click **Open Dashboard**.

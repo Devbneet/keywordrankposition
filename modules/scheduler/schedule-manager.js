@@ -91,6 +91,7 @@ export function createScheduleManager({
       status: enabled ? SCHEDULE_STATES.ENABLED : SCHEDULE_STATES.DISABLED,
       automationMode: norm.automationMode || AUTOMATION_MODES.MODE_A_REVIEW,
       sandboxMode: Boolean(input.sandboxMode),
+      isAuthorized: Boolean(input.isAuthorized),
       missedRunPolicy: norm.missedRunPolicy || MISSED_RUN_POLICIES.ASK_USER,
       syncSheetBeforeRun: input.syncSheetBeforeRun !== false,
       searchDepth: norm.searchDepth,
@@ -163,6 +164,7 @@ export function createScheduleManager({
     const updated = {
       ...merged,
       ...norm,
+      isAuthorized: Boolean(merged.isAuthorized),
       enabled,
       status: enabled
         ? merged.status === SCHEDULE_STATES.DISABLED

@@ -125,7 +125,7 @@ test("service worker handles HEALTH_CHECK, STORAGE_SELF_TEST, and OPEN_DASHBOARD
   assert.equal(health.ok, true);
   assert.equal(health.status, "healthy");
   assert.equal(health.storageOk, true);
-  assert.equal(health.version, "0.1.0");
+  assert.equal(health.version, "1.0.0");
 
   const storageRes = await handleRuntimeMessage({ type: MESSAGE_TYPES.STORAGE_SELF_TEST }, null, mockChrome);
   assert.equal(storageRes.ok, true);

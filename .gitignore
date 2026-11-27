@@ -15,6 +15,7 @@ client_secret*.json
 oauth_token*.json
 
 # Local client exports, backups & private configs
+dist/
 exports/
 client-backups/
 *-client-export*.json

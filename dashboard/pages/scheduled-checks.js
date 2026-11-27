@@ -79,6 +79,7 @@ export function createScheduledChecksPage({ onOpenSheetsForClient } = {}) {
   const schedDepthSelect = document.getElementById("sched-depth");
   const schedDelayInput = document.getElementById("sched-delay-ms");
   const schedSyncSheetChk = document.getElementById("sched-sync-sheet");
+  const schedAuthorizedChk = document.getElementById("sched-authorized");
   const schedModeSelect = document.getElementById("sched-mode");
   const schedEnabledChk = document.getElementById("sched-enabled");
 
@@ -177,6 +178,7 @@ export function createScheduledChecksPage({ onOpenSheetsForClient } = {}) {
       schedDepthSelect.value = "50";
       schedDelayInput.value = "3500";
       schedSyncSheetChk.checked = true;
+      schedAuthorizedChk.checked = false;
       schedModeSelect.value = AUTOMATION_MODES.MODE_A_REVIEW;
       schedEnabledChk.checked = true;
       for (const chk of batchClientsCheckboxesEl.querySelectorAll(".sched-batch-chk")) {
@@ -204,6 +206,7 @@ export function createScheduledChecksPage({ onOpenSheetsForClient } = {}) {
       schedDepthSelect.value = String(existingSchedule.searchDepth || 50);
       schedDelayInput.value = String(existingSchedule.delayBetweenKeywordsMs || 3500);
       schedSyncSheetChk.checked = existingSchedule.syncSheetBeforeRun !== false;
+      schedAuthorizedChk.checked = Boolean(existingSchedule.isAuthorized);
       schedModeSelect.value = existingSchedule.automationMode || AUTOMATION_MODES.MODE_A_REVIEW;
       schedEnabledChk.checked = existingSchedule.enabled !== false;
     }
@@ -565,6 +568,7 @@ export function createScheduledChecksPage({ onOpenSheetsForClient } = {}) {
       searchDepth: Number(schedDepthSelect.value),
       delayBetweenKeywordsMs: Number(schedDelayInput.value),
       syncSheetBeforeRun: schedSyncSheetChk.checked,
+      isAuthorized: schedAuthorizedChk.checked,
       automationMode: schedModeSelect.value,
       enabled: schedEnabledChk.checked,
       expectedKeywordCount: isBatch
