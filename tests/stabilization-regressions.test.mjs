@@ -337,11 +337,15 @@ test("Work Package D: concurrent claimExecution race allows exactly 1 winner, an
   assert.equal(okRel.ok, true);
 
   // Storage failure during scheduledJobRunner must NOT mark job Completed
+  let lastSavedJob = null;
   const runner = createScheduledJobRunner({
     clientStorage: {
       getClient: async () => ({ clientId: "c1", clientName: "Demo", websiteDomain: "example.com" }),
       listKeywordsByClient: async () => [{ keywordId: "k1", keyword: "test kw", active: true }],
-      saveJobRecord: async () => ({ ok: true }),
+      saveJobRecord: async (rec) => {
+        lastSavedJob = rec;
+        return { ok: true };
+      },
       saveResultsBatch: async () => ({ ok: false, error: "QuotaExceededError: disk full" }),
     },
     locationManager: {
@@ -378,7 +382,8 @@ test("Work Package D: concurrent claimExecution race allows exactly 1 winner, an
   });
   assert.equal(runRes.ok, false);
   assert.equal(runRes.execution.status, EXECUTION_STATES.FAILED);
-  assert.equal(runRes.execution.clientReports[0].jobState, JOB_STATES.INTERRUPTED);
+  assert.equal(runRes.execution.clientReports[0].storageFailure, true);
+  assert.equal(lastSavedJob?.state, JOB_STATES.INTERRUPTED);
 });
 
 test("Work Package E & F: repeated keyword tables get distinct sections, backup preserves userEnteredValue types, and write client validates modes", async () => {
