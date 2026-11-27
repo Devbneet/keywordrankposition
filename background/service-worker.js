@@ -182,7 +182,7 @@ function getOrCreateServices(chromeApi) {
           websiteDomain: client.websiteDomain,
           searchDepth: job.searchDepth || 50,
           deviceType: location.deviceType || job.deviceType || "Desktop",
-          isAuthorized: Boolean(schedule?.isAuthorized ?? job?.isAuthorized ?? true),
+          isAuthorized: Boolean(job?.isAuthorized),
           _caller: "bulk",
         });
         const r = res?.result || {};

@@ -86,8 +86,9 @@ export function evaluateTaskUpdatePolicy({
 
   if (task.status === TASK_STATUSES.NOT_FOUND) {
     const requestedDepth = Number(task.requestedDepth) || 50;
-    const checked = Number(task.checkedResults) || 0;
-    const depthConfirmed = task.isLiveVerified && (checked >= requestedDepth || Boolean(task.endOfResultsVerified));
+    const checked = Number(task.actualVerifiedDepth ?? task.checkedResults ?? 0);
+    const hasEndEvidence = Boolean(task.verifiedEndOfResults ?? task.endOfResultsVerified);
+    const depthConfirmed = task.isLiveVerified === true && (checked >= requestedDepth || hasEndEvidence);
     if (!depthConfirmed) {
       return {
         action: "SKIP_FAILED",

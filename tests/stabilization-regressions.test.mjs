@@ -14,16 +14,23 @@ import {
   RANKING_STATUSES,
 } from "../modules/ranking/ranking-state.js";
 import { createSingleKeywordChecker } from "../modules/ranking/single-keyword-checker.js";
+import { createClientManager } from "../modules/clients/client-manager.js";
+import { createClientStorage } from "../modules/clients/client-storage.js";
+import { createKeywordManager } from "../modules/clients/keyword-manager.js";
+import { createLocationManager } from "../modules/clients/location-manager.js";
 import { createJobManager } from "../modules/jobs/job-manager.js";
-import { JOB_STATES } from "../modules/jobs/job-state.js";
+import { recoverInterruptedJob } from "../modules/jobs/job-recovery.js";
+import { JOB_STATES, TASK_STATUSES } from "../modules/jobs/job-state.js";
 import { createJobStorage } from "../modules/jobs/job-storage.js";
 import { createScheduleStorage } from "../modules/scheduler/schedule-storage.js";
 import { createScheduledJobRunner } from "../modules/scheduler/scheduled-job-runner.js";
-import { EXECUTION_STATES } from "../modules/scheduler/scheduler-state.js";
+import { AUTOMATION_MODES, EXECUTION_STATES } from "../modules/scheduler/scheduler-state.js";
 import { buildRestoreBatchUpdateRequests } from "../modules/sheets/sheet-backup-manager.js";
 import { detectSheetStructure } from "../modules/sheets/sheet-structure-detector.js";
+import { createSheetUpdater } from "../modules/sheets/sheet-updater.js";
 import { evaluateTaskUpdatePolicy } from "../modules/sheets/sheet-update-validator.js";
 import { createSheetsWriteClient, UPDATE_MODES } from "../modules/sheets/sheets-write-client.js";
+import { createUpdateJournal } from "../modules/sheets/update-journal.js";
 import { createStorageClient } from "../modules/storage/storage.js";
 
 function createMemoryChromeStorage() {
@@ -467,4 +474,228 @@ test("Work Package E & F: repeated keyword tables get distinct sections, backup 
   assert.equal(mockMode.ok, true);
   assert.equal(mockMode.mocked, true);
   assert.equal(fetched, false);
+});
+
+test("RC3 regression: sheetUpdater blocks missing explicit locationId, writeClient blocks untrusted sandboxAllowlist & unapproved production", async () => {
+  const storageClient = createStorageClient(createMemoryChromeStorage());
+  const clientStorage = createClientStorage({ storageClient, idbFactory: null });
+  const locationManager = createLocationManager({ clientStorage });
+  const keywordManager = createKeywordManager({ clientStorage });
+  const clientManager = createClientManager({ clientStorage, locationManager, keywordManager });
+
+  await clientManager.createClient({
+    clientId: "cli_rc3",
+    clientName: "RC3 Client",
+    websiteDomain: "rc3.example.com",
+    sheetConfig: { spreadsheetId: "sheet_rc3", worksheetId: "0", worksheetName: "Keywords" },
+  });
+  await locationManager.addLocation({
+    clientId: "cli_rc3",
+    locationId: "loc_rc3_1",
+    locationName: "Sydney",
+    targetCity: "Sydney",
+    latitude: -33.8688,
+    longitude: 151.2093,
+  });
+
+  const updater = createSheetUpdater({
+    clientStorage,
+    locationManager,
+    sheetsApiClient: {},
+    sheetsWriteClient: createSheetsWriteClient({
+      authClient: { getValidToken: async () => ({ ok: true, token: "t" }) },
+    }),
+    sheetReader: {},
+    backupManager: { getBackup: async () => null, verifyBackupIntegrity: () => ({ valid: false }) },
+    updateJournal: createUpdateJournal({ storageClient, idbFactory: null }),
+    authClient: { getStatus: async () => ({ writeAccessEnabled: true }) },
+  });
+
+  // Missing explicit locationId must NOT fall back to loc_rc3_1
+  const previewMissingLoc = await updater.generatePreview({
+    clientId: "cli_rc3",
+    locationId: "loc_does_not_exist",
+    job: { jobId: "j1", clientId: "cli_rc3", locationId: "loc_does_not_exist" },
+    tasks: [],
+  });
+  assert.equal(previewMissingLoc.ok, false);
+  assert.match(previewMissingLoc.error, /not found/i);
+
+  // Caller-supplied sandboxAllowlist must NOT bypass trusted sandboxSpreadsheetIds
+  const wc = createSheetsWriteClient({
+    authClient: { getValidToken: async () => ({ ok: true, token: "t" }) },
+    sandboxSpreadsheetIds: ["trusted_sandbox_sheet"],
+    productionWritesEnabled: false,
+  });
+  const evilSandbox = await wc.executeBatchUpdate({
+    spreadsheetId: "evil_untrusted_sheet",
+    requests: [{ insertDimension: {} }],
+    mode: UPDATE_MODES.SANDBOX,
+    dryRun: false,
+    sandboxAllowlist: ["evil_untrusted_sheet"],
+  });
+  assert.equal(evilSandbox.ok, false);
+  assert.equal(evilSandbox.code, "SANDBOX_SPREADSHEET_NOT_ALLOWED");
+
+  // Production mode must remain blocked unless BOTH productionWritesEnabled & productionApproved are true
+  const prodBlocked = await wc.executeBatchUpdate({
+    spreadsheetId: "prod_sheet",
+    requests: [{ insertDimension: {} }],
+    mode: UPDATE_MODES.PRODUCTION,
+    dryRun: false,
+    productionApproved: true,
+  });
+  assert.equal(prodBlocked.ok, false);
+  assert.equal(prodBlocked.code, "PRODUCTION_WRITES_DISABLED");
+});
+
+test("RC3 regression: sheet-update-validator uses canonical verifiedEndOfResults & actualVerifiedDepth, and backup supports multi-GridData + insertedColumnIndex delete", () => {
+  const notFoundCanonical = evaluateTaskUpdatePolicy({
+    task: {
+      status: TASK_STATUSES.NOT_FOUND,
+      requestedDepth: 50,
+      actualVerifiedDepth: 12,
+      verifiedEndOfResults: true,
+      isLiveVerified: true,
+    },
+  });
+  assert.equal(notFoundCanonical.action, "WRITE_NA");
+  assert.equal(notFoundCanonical.writeRank, true);
+
+  const notFoundIncomplete = evaluateTaskUpdatePolicy({
+    task: {
+      status: TASK_STATUSES.NOT_FOUND,
+      requestedDepth: 50,
+      actualVerifiedDepth: 12,
+      verifiedEndOfResults: false,
+      isLiveVerified: true,
+    },
+  });
+  assert.equal(notFoundIncomplete.action, "SKIP_FAILED");
+  assert.equal(notFoundIncomplete.writeRank, false);
+
+  // Multi-GridData blocks + insertedColumnIndex inverse deleteDimension + hiddenByUser + filterViews
+  const reqs = buildRestoreBatchUpdateRequests(
+    {
+      worksheetId: 0,
+      snapshotData: {
+        displayValues: [["A", "B"], ["C", "D"], ["E", "F"]],
+        formulaValues: [["A", "B"], ["C", "D"], ["E", "F"]],
+        filterViews: [{ title: "Saved View", range: { startRowIndex: 0, endRowIndex: 3 } }],
+        gridDataBlocks: [
+          {
+            startRow: 0,
+            startColumn: 0,
+            rowData: [{ values: [{ userEnteredValue: { stringValue: "A" } }, { userEnteredValue: { stringValue: "B" } }] }],
+            columnMetadata: [{ pixelSize: 120, hiddenByUser: false }],
+          },
+          {
+            startRow: 2,
+            startColumn: 0,
+            rowData: [{ values: [{ userEnteredValue: { stringValue: "E" } }, { userEnteredValue: { stringValue: "F" } }] }],
+            rowMetadata: [{ pixelSize: 28, hiddenByUser: true }],
+          },
+        ],
+      },
+    },
+    { insertedColumnIndex: 7 }
+  );
+
+  assert.ok(reqs[0].deleteDimension);
+  assert.equal(reqs[0].deleteDimension.range.startIndex, 7);
+  const updateCellsReqs = reqs.filter((r) => Boolean(r.updateCells));
+  assert.equal(updateCellsReqs.length, 2);
+  assert.equal(updateCellsReqs[1].updateCells.range.startRowIndex, 2);
+  assert.ok(reqs.some((r) => r.addFilterView?.filter?.title === "Saved View"));
+  assert.ok(reqs.some((r) => r.updateDimensionProperties?.properties?.hiddenByUser === true));
+});
+
+test("RC3 regression: scheduledJobRunner uses reporting timezone date & UPDATE_MODES.PRODUCTION, and jobRecovery sets checkpoint metadata", async () => {
+  const mem = createMemoryChromeStorage();
+  const storageClient = createStorageClient(mem);
+  const schedStorage = createScheduleStorage({ storageClient, idbFactory: null });
+
+  await schedStorage.saveSchedule({
+    scheduleId: "sched_tz",
+    clientId: "c_tz",
+    locationId: "l_tz",
+    timezone: "Australia/Sydney",
+    automationMode: AUTOMATION_MODES.MODE_B_AUTO_SHEET,
+    sandboxMode: false,
+    isAuthorized: true,
+    syncSheetBeforeRun: false,
+    testFastDelayMs: 0,
+    enabled: true,
+  });
+  await schedStorage.saveSchedulerSettings({ unattendedProdSheetWritesEnabled: true });
+
+  let capturedPreviewDate = null;
+  let capturedExecuteMode = null;
+
+  const runner = createScheduledJobRunner({
+    clientStorage: {
+      getClient: async () => ({
+        clientId: "c_tz",
+        clientName: "TZ Client",
+        websiteDomain: "tz.example.com",
+        sheetConfig: { spreadsheetId: "sheet_tz", worksheetId: "0" },
+      }),
+      listKeywordsByClient: async () => [{ keywordId: "k1", keyword: "tz kw", active: true }],
+      saveJobRecord: async () => ({ ok: true }),
+      saveResultsBatch: async () => ({ ok: true }),
+    },
+    locationManager: {
+      listLocations: async () => [
+        { locationId: "l_tz", locationName: "Sydney", reportingTimezone: "Australia/Sydney", latitude: -33.86, longitude: 151.2 },
+      ],
+    },
+    scheduleStorage: schedStorage,
+    runKeywordCheck: async () => ({
+      status: TASK_STATUSES.RANKED,
+      position: 4,
+      rankingUrl: "https://tz.example.com/",
+      isLiveVerified: true,
+      actualResultsChecked: 10,
+    }),
+    sheetUpdater: {
+      generatePreview: async ({ reportingDate }) => {
+        capturedPreviewDate = reportingDate;
+        return {
+          ok: true,
+          preview: { spreadsheetId: "sheet_tz", worksheetId: "0", worksheetName: "Keywords", planFingerprint: "fp1" },
+          snapshot: { structureFingerprint: "sf1" },
+        };
+      },
+      executeApprovedUpdate: async ({ mode, productionApproved }) => {
+        capturedExecuteMode = { mode, productionApproved };
+        return { ok: false, code: "PRODUCTION_WRITES_DISABLED" };
+      },
+    },
+    sheetBackupManager: {
+      createAndVerifyBackup: async () => ({ ok: true, backup: { backupId: "bkp_1" } }),
+    },
+  });
+
+  // 2026-11-27T20:00:00Z is 2026-11-28 07:00:00 AEDT in Australia/Sydney
+  await runner.runExecution(
+    { executionId: "exec_tz", scheduleId: "sched_tz", clientId: "c_tz", locationId: "l_tz" },
+    { now: new Date("2026-11-27T20:00:00.000Z") }
+  );
+  assert.equal(capturedPreviewDate, "2026-11-28");
+  assert.equal(capturedExecuteMode.mode, UPDATE_MODES.PRODUCTION);
+  assert.equal(capturedExecuteMode.productionApproved, false);
+
+  // Job recovery sets resumableFromCheckpoint, completedCount, pendingCount
+  const jobStorage = createJobStorage({ storageClient });
+  await jobStorage.saveJobMetadata({ jobId: "j_rec", state: JOB_STATES.RUNNING });
+  await jobStorage.saveTaskBatch("j_rec", [
+    { taskId: "t1", jobId: "j_rec", status: TASK_STATUSES.RANKED },
+    { taskId: "t2", jobId: "j_rec", status: TASK_STATUSES.RUNNING },
+  ]);
+  const rec = await recoverInterruptedJob({ jobStorage });
+  assert.equal(rec.recovered, true);
+  assert.equal(rec.job.state, JOB_STATES.RECOVERY_REQUIRED);
+  assert.equal(rec.job.resumableFromCheckpoint, true);
+  assert.equal(rec.job.completedCount, 1);
+  assert.equal(rec.job.pendingCount, 1);
 });

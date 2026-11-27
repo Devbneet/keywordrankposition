@@ -53,6 +53,29 @@ export function createSheetUpdater({
     return { ...readRes, displayRows };
   }
 
+  function resolveExplicitLocation(clientLocs, locationId, clientId) {
+    if (locationId) {
+      const found = clientLocs.find((l) => l.locationId === locationId) || null;
+      if (!found) {
+        return {
+          ok: false,
+          error: `Configured location '${locationId}' was not found for client '${clientId}'.`,
+        };
+      }
+      return { ok: true, location: found };
+    }
+    if (clientLocs.length === 1) {
+      return { ok: true, location: clientLocs[0] };
+    }
+    if (clientLocs.length > 1) {
+      return {
+        ok: false,
+        error: `Explicit locationId is required because client '${clientId}' has ${clientLocs.length} locations.`,
+      };
+    }
+    return { ok: true, location: null };
+  }
+
   async function generatePreview({
     clientId,
     locationId = null,
@@ -66,7 +89,11 @@ export function createSheetUpdater({
     if (!ctx.ok) return { ...ctx, operationStatus: OPERATION_STATES.UPDATE_FAILED };
 
     const clientLocs = ctx.locationsByClient[clientId] || [];
-    const location = (locationId && clientLocs.find((l) => l.locationId === locationId)) || clientLocs[0] || null;
+    const locResolved = resolveExplicitLocation(clientLocs, locationId, clientId);
+    if (!locResolved.ok) {
+      return { ok: false, operationStatus: OPERATION_STATES.UPDATE_FAILED, error: locResolved.error };
+    }
+    const location = locResolved.location;
 
     const live = await readLiveValuesAndStructure({
       clientId,
@@ -141,6 +168,7 @@ export function createSheetUpdater({
     explicitHeaderLabel = "",
     mode = "dry-run",
     dryRun = true,
+    productionApproved = false,
   } = {}) {
     const authStatus = await authClient.getStatus();
     if (!authStatus.writeAccessEnabled && mode !== "dry-run") {
@@ -163,7 +191,11 @@ export function createSheetUpdater({
     const ctx = await loadClientContext(clientId);
     if (!ctx.ok) return { ...ctx, operationStatus: OPERATION_STATES.UPDATE_FAILED };
     const clientLocs = ctx.locationsByClient[clientId] || [];
-    const location = (locationId && clientLocs.find((l) => l.locationId === locationId)) || clientLocs[0] || null;
+    const locResolved = resolveExplicitLocation(clientLocs, locationId, clientId);
+    if (!locResolved.ok) {
+      return { ok: false, operationStatus: OPERATION_STATES.UPDATE_FAILED, error: locResolved.error };
+    }
+    const location = locResolved.location;
 
     // Step 1: Duplicate update guard against exact approved preview
     const dupPreCheck = await updateJournal.hasSuccessfulDuplicateUpdate({
@@ -305,6 +337,7 @@ export function createSheetUpdater({
         requests: plan.requests,
         mode,
         dryRun,
+        productionApproved,
       });
 
       if (!writeRes.ok) {

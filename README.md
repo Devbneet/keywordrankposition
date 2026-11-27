@@ -1,6 +1,6 @@
 # Digital Minds Rank Tracker (Chrome Extension)
 
-An internal, 100% free **Chrome Extension (Manifest V3)** (`v1.0.0-rc.2`) for **Digital Minds** to check location-specific organic keyword rankings, validate accuracy against GS Location Changer, manage multiple SEO clients, schedule weekly checks, and update client Google Sheets while preserving all spreadsheet formatting and history.
+An internal, 100% free **Chrome Extension (Manifest V3)** (`v1.0.0-rc.3`) for **Digital Minds** to check location-specific organic keyword rankings, validate accuracy against GS Location Changer, manage multiple SEO clients, schedule weekly checks, and update client Google Sheets while preserving all spreadsheet formatting and history.
 
 > **Branch Policy:** Active extension development is on `extension-development`. The legacy Python/Playwright implementation is preserved on `backup/python-version`.
 

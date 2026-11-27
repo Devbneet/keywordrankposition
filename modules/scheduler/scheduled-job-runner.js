@@ -14,6 +14,7 @@
 
 import { isFailedTaskStatus, JOB_STATES, TASK_STATUSES } from "../jobs/job-state.js";
 import { NOTIFICATION_EVENTS } from "../notifications/notification-manager.js";
+import { UPDATE_MODES } from "../sheets/sheets-write-client.js";
 import { calculateNextRunAt } from "./schedule-calculator.js";
 import {
   AUTOMATION_MODES,
@@ -27,6 +28,24 @@ import {
 function delayMs(ms) {
   if (!ms || ms <= 0) return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatDateInTimezone(date, timeZone = "Australia/Sydney") {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(date);
+  }
 }
 
 export function createScheduledJobRunner({
@@ -199,6 +218,7 @@ export function createScheduledJobRunner({
       websiteDomain: client.websiteDomain,
       searchDepth: schedule.searchDepth || 50,
       deviceType: location.deviceType || "Desktop",
+      isAuthorized: Boolean(schedule.isAuthorized),
       state: JOB_STATES.RUNNING,
       createdAt: now.toISOString(),
       tasks: activeKeywords.map((kw, idx) => ({
@@ -382,7 +402,9 @@ export function createScheduledJobRunner({
     ).length;
 
     if (!haltedByStorage && !haltedByCaptcha && !haltedByLocation && completedCleanCount > 0 && sheetUrlOrId && sheetUpdater) {
-      const reportingDate = now.toISOString().slice(0, 10);
+      const reportingTimezone =
+        location.reportingTimezone || schedule.timezone || client.sheetConfig?.timeZone || "Australia/Sydney";
+      const reportingDate = formatDateInTimezone(now, reportingTimezone);
       const prevRes = await sheetUpdater.generatePreview({
         clientId: client.clientId,
         locationId: location.locationId,
@@ -421,8 +443,9 @@ export function createScheduledJobRunner({
               approvalConfirmation: true,
               backupId: bkpRes.backup.backupId,
               reportingDate,
-              mode: schedule.sandboxMode ? "sandbox" : "live",
+              mode: schedule.sandboxMode ? UPDATE_MODES.SANDBOX : UPDATE_MODES.PRODUCTION,
               dryRun: false,
+              productionApproved: Boolean(schedule.productionApproved && settings.unattendedProdSheetWritesEnabled),
             });
           } else {
             sheetPreviewError = bkpRes.error;

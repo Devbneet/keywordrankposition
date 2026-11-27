@@ -23,25 +23,36 @@ function computeIntegrityHash(obj) {
   return `${(h2 >>> 0).toString(16).padStart(8, "0")}${(h1 >>> 0).toString(16).padStart(8, "0")}`;
 }
 
+function getGridDataBlocks(snapshotData) {
+  if (Array.isArray(snapshotData?.gridDataBlocks) && snapshotData.gridDataBlocks.length > 0) {
+    return snapshotData.gridDataBlocks;
+  }
+  return snapshotData?.gridData ? [snapshotData.gridData] : [];
+}
+
 function hasSufficientRestorationEvidence(snapshotData) {
-  if (!snapshotData?.sheetProperties || !snapshotData?.gridData) return false;
-  const rows = snapshotData.gridData.rowData || [];
+  const blocks = getGridDataBlocks(snapshotData);
+  if (!snapshotData?.sheetProperties || blocks.length === 0) return false;
   const hasDisplay = Array.isArray(snapshotData.displayValues) && snapshotData.displayValues.length > 0;
   const hasFormula = Array.isArray(snapshotData.formulaValues) && snapshotData.formulaValues.length > 0;
   if (!hasDisplay || !hasFormula || snapshotData.displayValues.length !== snapshotData.formulaValues.length) {
     return false;
   }
-  const hasFormattingEvidence = rows.some((r) =>
-    (r.values || []).some((c) => Boolean(c?.effectiveFormat || c?.userEnteredFormat))
+  const hasFormattingEvidence = blocks.some((b) =>
+    (b.rowData || []).some((r) =>
+      (r.values || []).some((c) => Boolean(c?.effectiveFormat || c?.userEnteredFormat))
+    )
   );
-  const hasDimensionEvidence =
-    (snapshotData.gridData.columnMetadata || []).length > 0 ||
-    (snapshotData.gridData.rowMetadata || []).length > 0 ||
-    rows.length > 0;
+  const hasDimensionEvidence = blocks.some(
+    (b) =>
+      (b.columnMetadata || []).length > 0 ||
+      (b.rowMetadata || []).length > 0 ||
+      (b.rowData || []).length > 0
+  );
   return hasFormattingEvidence && hasDimensionEvidence;
 }
 
-export function buildRestoreBatchUpdateRequests(backupRecord) {
+export function buildRestoreBatchUpdateRequests(backupRecord, { insertedColumnIndex = null } = {}) {
   const snap = backupRecord?.snapshotData;
   const sheetId = Number(backupRecord?.worksheetId);
   if (!snap || !Number.isInteger(sheetId) || sheetId < 0) {
@@ -49,87 +60,133 @@ export function buildRestoreBatchUpdateRequests(backupRecord) {
   }
 
   const requests = [];
-  const rowCount = snap.displayValues?.length || 0;
-  const colCount = Math.max(
-    ...(snap.displayValues || [[]]).map((r) => r.length),
-    ...(snap.formulaValues || [[]]).map((r) => r.length),
-    1
-  );
 
-  // 1. Restore values, formulas, and user/effective cell formatting across exact captured range
-  const gridRows = [];
-  for (let r = 0; r < rowCount; r += 1) {
-    const dispRow = snap.displayValues[r] || [];
-    const formRow = snap.formulaValues[r] || [];
-    const gridCellRow = snap.gridData?.rowData?.[r]?.values || [];
-    const cellObjs = [];
-    for (let c = 0; c < colCount; c += 1) {
-      const fVal = formRow[c];
-      const dVal = dispRow[c];
-      const rawCell = gridCellRow[c];
-      const cellFormat = rawCell?.userEnteredFormat || rawCell?.effectiveFormat || undefined;
-      let userEnteredValue;
-      if (rawCell && rawCell.userEnteredValue !== undefined) {
-        // Preserve exact original cell type (leading-zero strings, numbers, booleans, formulas, or blank)
-        userEnteredValue = structuredClone(rawCell.userEnteredValue);
-      } else if (typeof fVal === "string" && fVal.startsWith("=")) {
-        userEnteredValue = { formulaValue: fVal };
-      } else if (typeof dVal === "number" && Number.isFinite(dVal)) {
-        userEnteredValue = { numberValue: dVal };
-      } else if (typeof dVal === "boolean") {
-        userEnteredValue = { boolValue: dVal };
-      } else if (dVal === "" || dVal === null || dVal === undefined) {
-        userEnteredValue = {};
-      } else {
-        userEnteredValue = { stringValue: String(dVal) };
-      }
-      cellObjs.push({
-        userEnteredValue,
-        ...(cellFormat ? { userEnteredFormat: cellFormat } : {}),
-      });
-    }
-    gridRows.push({ values: cellObjs });
+  // 0. If an update inserted a physical ranking date column, remove it first so coordinates match pre-write state
+  if (Number.isInteger(insertedColumnIndex) && insertedColumnIndex >= 0) {
+    requests.push({
+      deleteDimension: {
+        range: {
+          sheetId,
+          dimension: "COLUMNS",
+          startIndex: insertedColumnIndex,
+          endIndex: insertedColumnIndex + 1,
+        },
+      },
+    });
   }
 
-  requests.push({
-    updateCells: {
-      range: {
-        sheetId,
-        startRowIndex: 0,
-        endRowIndex: rowCount,
-        startColumnIndex: 0,
-        endColumnIndex: colCount,
-      },
-      rows: gridRows,
-      fields: "userEnteredValue,userEnteredFormat",
-    },
-  });
+  const blocks = getGridDataBlocks(snap);
+  const blocksToProcess = blocks.length > 0 ? blocks : [{ startRow: 0, startColumn: 0, rowData: [] }];
 
-  // 2. Restore column widths & row heights
-  (snap.gridData?.columnMetadata || []).forEach((meta, idx) => {
-    if (meta?.pixelSize) {
+  for (const block of blocksToProcess) {
+    const startRow = Number(block.startRow || 0);
+    const startCol = Number(block.startColumn || 0);
+    const blockRows = block.rowData || [];
+    const rowCount = blockRows.length > 0 ? blockRows.length : (snap.displayValues?.length || 0);
+    const colCount = Math.max(
+      ...blockRows.map((r) => (r.values || []).length),
+      ...(snap.displayValues || [[]]).map((r) => r.length),
+      ...(snap.formulaValues || [[]]).map((r) => r.length),
+      1
+    );
+
+    const gridRows = [];
+    for (let r = 0; r < rowCount; r += 1) {
+      const absR = startRow + r;
+      const dispRow = snap.displayValues?.[absR] || [];
+      const formRow = snap.formulaValues?.[absR] || [];
+      const gridCellRow = blockRows[r]?.values || [];
+      const cellObjs = [];
+      for (let c = 0; c < colCount; c += 1) {
+        const absC = startCol + c;
+        const fVal = formRow[absC];
+        const dVal = dispRow[absC];
+        const rawCell = gridCellRow[c];
+        const cellFormat = rawCell?.userEnteredFormat || rawCell?.effectiveFormat || undefined;
+        let userEnteredValue;
+        if (rawCell && rawCell.userEnteredValue !== undefined) {
+          userEnteredValue = structuredClone(rawCell.userEnteredValue);
+        } else if (typeof fVal === "string" && fVal.startsWith("=")) {
+          userEnteredValue = { formulaValue: fVal };
+        } else if (typeof dVal === "number" && Number.isFinite(dVal)) {
+          userEnteredValue = { numberValue: dVal };
+        } else if (typeof dVal === "boolean") {
+          userEnteredValue = { boolValue: dVal };
+        } else if (dVal === "" || dVal === null || dVal === undefined) {
+          userEnteredValue = {};
+        } else {
+          userEnteredValue = { stringValue: String(dVal) };
+        }
+        cellObjs.push({
+          userEnteredValue,
+          ...(cellFormat ? { userEnteredFormat: cellFormat } : {}),
+        });
+      }
+      gridRows.push({ values: cellObjs });
+    }
+
+    if (gridRows.length > 0) {
       requests.push({
-        updateDimensionProperties: {
-          range: { sheetId, dimension: "COLUMNS", startIndex: idx, endIndex: idx + 1 },
-          properties: { pixelSize: meta.pixelSize },
-          fields: "pixelSize",
+        updateCells: {
+          range: {
+            sheetId,
+            startRowIndex: startRow,
+            endRowIndex: startRow + rowCount,
+            startColumnIndex: startCol,
+            endColumnIndex: startCol + colCount,
+          },
+          rows: gridRows,
+          fields: "userEnteredValue,userEnteredFormat",
         },
       });
     }
-  });
-  (snap.gridData?.rowMetadata || []).forEach((meta, idx) => {
-    if (meta?.pixelSize) {
-      requests.push({
-        updateDimensionProperties: {
-          range: { sheetId, dimension: "ROWS", startIndex: idx, endIndex: idx + 1 },
-          properties: { pixelSize: meta.pixelSize },
-          fields: "pixelSize",
-        },
-      });
-    }
-  });
 
-  // 3. Restore merges & basicFilter
+    (block.columnMetadata || []).forEach((meta, idx) => {
+      const props = {};
+      const fields = [];
+      if (meta?.pixelSize) {
+        props.pixelSize = meta.pixelSize;
+        fields.push("pixelSize");
+      }
+      if (typeof meta?.hiddenByUser === "boolean") {
+        props.hiddenByUser = meta.hiddenByUser;
+        fields.push("hiddenByUser");
+      }
+      if (fields.length > 0) {
+        requests.push({
+          updateDimensionProperties: {
+            range: { sheetId, dimension: "COLUMNS", startIndex: startCol + idx, endIndex: startCol + idx + 1 },
+            properties: props,
+            fields: fields.join(","),
+          },
+        });
+      }
+    });
+
+    (block.rowMetadata || []).forEach((meta, idx) => {
+      const props = {};
+      const fields = [];
+      if (meta?.pixelSize) {
+        props.pixelSize = meta.pixelSize;
+        fields.push("pixelSize");
+      }
+      if (typeof meta?.hiddenByUser === "boolean") {
+        props.hiddenByUser = meta.hiddenByUser;
+        fields.push("hiddenByUser");
+      }
+      if (fields.length > 0) {
+        requests.push({
+          updateDimensionProperties: {
+            range: { sheetId, dimension: "ROWS", startIndex: startRow + idx, endIndex: startRow + idx + 1 },
+            properties: props,
+            fields: fields.join(","),
+          },
+        });
+      }
+    });
+  }
+
+  // 3. Restore merges, basicFilter, filterViews & conditionalFormats
   for (const m of snap.merges || []) {
     requests.push({
       mergeCells: {
@@ -144,6 +201,16 @@ export function buildRestoreBatchUpdateRequests(backupRecord) {
         filter: {
           ...snap.basicFilter,
           range: { ...(snap.basicFilter.range || {}), sheetId },
+        },
+      },
+    });
+  }
+  for (const fv of snap.filterViews || []) {
+    requests.push({
+      addFilterView: {
+        filter: {
+          ...fv,
+          range: { ...(fv.range || {}), sheetId },
         },
       },
     });
@@ -234,6 +301,7 @@ export function createSheetBackupManager({
       filterViews: gridSheet?.filterViews || sheetMeta.filterViews || [],
       conditionalFormats: gridSheet?.conditionalFormats || sheetMeta.conditionalFormats || [],
       gridData: gridSheet?.data?.[0] || null,
+      gridDataBlocks: Array.isArray(gridSheet?.data) ? gridSheet.data : [],
       displayValues,
       formulaValues,
     };

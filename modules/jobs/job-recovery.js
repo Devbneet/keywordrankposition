@@ -40,14 +40,22 @@ export async function recoverInterruptedJob({ jobStorage }) {
     }
   }
 
+  const completedCount = updatedTasks.filter(
+    (t) => t.status === TASK_STATUSES.RANKED || t.status === TASK_STATUSES.NOT_FOUND
+  ).length;
+  const pendingCount = updatedTasks.filter((t) => t.status === TASK_STATUSES.PENDING).length;
+
   const recoveredJob = {
     ...job,
     state: JOB_STATES.RECOVERY_REQUIRED,
     currentKeyword: null,
+    resumableFromCheckpoint: pendingCount > 0,
+    completedCount,
+    pendingCount,
     interruptedAt: new Date().toISOString(),
     interruptionReason: resetMidFlight
-      ? "Service worker or browser closed while checking a keyword. Re-verify location and click Resume."
-      : "Session interrupted before job completion. Re-verify location and click Resume.",
+      ? "Service worker or browser closed while checking a keyword. Re-verify location and authorization before resuming."
+      : "Session interrupted before job completion. Re-verify location and authorization before resuming.",
   };
 
   const saveJobRes = await jobStorage.saveJobMetadata(recoveredJob);

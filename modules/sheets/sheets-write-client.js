@@ -18,17 +18,22 @@ export function createSheetsWriteClient({
   authClient,
   fetchImpl = globalThis.fetch?.bind(globalThis),
   sandboxSpreadsheetIds = [],
+  productionWritesEnabled = false,
 } = {}) {
   if (!authClient) {
     throw new Error("authClient is required for createSheetsWriteClient.");
   }
+
+  const trustedSandboxIds = new Set(
+    Array.isArray(sandboxSpreadsheetIds) ? sandboxSpreadsheetIds.map((id) => String(id || "").trim()).filter(Boolean) : []
+  );
 
   async function executeBatchUpdate({
     spreadsheetId,
     requests,
     mode = UPDATE_MODES.DRY_RUN,
     dryRun = true,
-    sandboxAllowlist = sandboxSpreadsheetIds,
+    productionApproved = false,
   } = {}) {
     const allowedModes = new Set(Object.values(UPDATE_MODES));
     if (!allowedModes.has(mode)) {
@@ -60,11 +65,21 @@ export function createSheetsWriteClient({
     }
 
     if (mode === UPDATE_MODES.SANDBOX) {
-      if (!Array.isArray(sandboxAllowlist) || !sandboxAllowlist.includes(spreadsheetId)) {
+      if (!trustedSandboxIds.has(spreadsheetId)) {
         return {
           ok: false,
           code: "SANDBOX_SPREADSHEET_NOT_ALLOWED",
-          error: `Spreadsheet '${spreadsheetId}' is not in the designated sandbox allowlist.`,
+          error: `Spreadsheet '${spreadsheetId}' is not in the trusted sandbox allowlist.`,
+        };
+      }
+    }
+
+    if (mode === UPDATE_MODES.PRODUCTION) {
+      if (productionWritesEnabled !== true || productionApproved !== true) {
+        return {
+          ok: false,
+          code: "PRODUCTION_WRITES_DISABLED",
+          error: "Production Google Sheets writes are disabled until sandbox verification and explicit owner approval are completed.",
         };
       }
     }
