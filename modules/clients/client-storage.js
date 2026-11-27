@@ -72,6 +72,11 @@ export function createClientStorage({
     return db.putOne(STORES.JOBS, job);
   }
 
+  async function getJobRecord(jobId) {
+    if (!jobId) return null;
+    return db.getByKey(STORES.JOBS, jobId);
+  }
+
   async function listJobsByClient(clientId) {
     const rows = await db.getByIndex(STORES.JOBS, "by_client", clientId);
     return rows.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
@@ -221,6 +226,7 @@ export function createClientStorage({
     listKeywordsByClient,
     deleteKeyword,
     saveJobRecord,
+    getJobRecord,
     listJobsByClient,
     saveResultsBatch,
     listResultsByClient,

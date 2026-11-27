@@ -235,14 +235,27 @@ export function createScheduleStorage({
   }
 
   async function releaseExecutionLock(ownerId = null) {
-    const current = await getExecutionLock();
-    if (!current) return { ok: true, released: false };
-    if (ownerId && current.ownerId !== ownerId) {
-      return { ok: false, released: false, error: "Lock owned by a different operation." };
-    }
-    const delRes = await db.deleteMany(STORES.SETTINGS, [SCHEDULER_LOCK_KEY]);
-    if (!delRes.ok) return { ok: false, released: false, error: delRes.error };
-    return { ok: true, released: true };
+    const res = await db.atomicUpdate(STORES.SETTINGS, SCHEDULER_LOCK_KEY, (rec) => {
+      const current = rec?.value || null;
+      if (!current || !current.ownerId) {
+        return { ok: true, released: false, value: { key: SCHEDULER_LOCK_KEY, value: null, updatedAt: new Date().toISOString() } };
+      }
+      if (ownerId && current.ownerId !== ownerId) {
+        return { ok: false, released: false, error: "Lock owned by a different operation." };
+      }
+      return {
+        ok: true,
+        released: true,
+        value: {
+          key: SCHEDULER_LOCK_KEY,
+          value: null,
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    });
+    return res.ok
+      ? { ok: true, released: Boolean(res.released) }
+      : { ok: false, released: false, error: res.error || "Failed releasing execution lock." };
   }
 
   return {

@@ -150,6 +150,10 @@ test("Phase 9 regression: post-update verifier catches older historical tamperin
         status: TASK_STATUSES.RANKED,
         position: 1,
         rankingUrl: "https://apexservices.example.com/emergency",
+        sourceMode: "live_bulk",
+        browserGpsStatus: "GPS verified",
+        googleLocationStatus: "Google location matched",
+        googleLocationSourceType: "device",
         isLiveVerified: true,
       },
     ],
@@ -259,7 +263,20 @@ test("Phase 9 regression: journal persistence failure blocks initiating a live w
   });
 
   const tasks = [
-    { taskId: "t7", rowNumber: 7, rowPosition: 7, keyword: "emergency plumber sydney", status: TASK_STATUSES.RANKED, position: 1, rankingUrl: "https://apexservices.example.com/emergency", isLiveVerified: true },
+    {
+      taskId: "t7",
+      rowNumber: 7,
+      rowPosition: 7,
+      keyword: "emergency plumber sydney",
+      status: TASK_STATUSES.RANKED,
+      position: 1,
+      rankingUrl: "https://apexservices.example.com/emergency",
+      sourceMode: "live_bulk",
+      browserGpsStatus: "GPS verified",
+      googleLocationStatus: "Google location matched",
+      googleLocationSourceType: "device",
+      isLiveVerified: true,
+    },
   ];
   const prev = await updater.generatePreview({ clientId: "cli_apex", job: { jobId: "j1", clientId: "cli_apex" }, tasks, reportingDate: "2026-11-30" });
   const bkp = await backupManager.createAndVerifyBackup({

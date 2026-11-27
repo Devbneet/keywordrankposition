@@ -298,6 +298,10 @@ test("scheduledJobRunner runs multi-client sequential checks, retries transient 
         status: TASK_STATUSES.RANKED,
         position: 3,
         rankingUrl: `https://${client.websiteDomain}/landing`,
+        sourceMode: "live_bulk",
+        browserGpsVerification: "GPS verified",
+        googleLocationVerification: "Google location matched",
+        googleLocationSourceType: "device",
         isLiveVerified: true,
         actualResultsChecked: 20,
       };

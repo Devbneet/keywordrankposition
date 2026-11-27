@@ -18,6 +18,7 @@ export function createSheetsWriteClient({
   authClient,
   fetchImpl = globalThis.fetch?.bind(globalThis),
   sandboxSpreadsheetIds = [],
+  isSandboxSpreadsheetAllowed = null,
   productionWritesEnabled = false,
 } = {}) {
   if (!authClient) {
@@ -65,7 +66,12 @@ export function createSheetsWriteClient({
     }
 
     if (mode === UPDATE_MODES.SANDBOX) {
-      if (!trustedSandboxIds.has(spreadsheetId)) {
+      const allowedByStatic = trustedSandboxIds.has(spreadsheetId);
+      const allowedByStore =
+        !allowedByStatic && typeof isSandboxSpreadsheetAllowed === "function"
+          ? Boolean(await isSandboxSpreadsheetAllowed(spreadsheetId))
+          : false;
+      if (!allowedByStatic && !allowedByStore) {
         return {
           ok: false,
           code: "SANDBOX_SPREADSHEET_NOT_ALLOWED",

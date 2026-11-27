@@ -469,10 +469,13 @@ export function createSheetBackupManager({
 
   async function restoreFromBackup({
     backupRecord,
+    operationEntry = null,
+    sheetReader = null,
     writeClient = sheetsWriteClient,
     mode = "dry-run",
     dryRun = true,
     confirmedByUser = false,
+    insertedColumnIndex = null,
   } = {}) {
     if (!backupRecord) {
       return { ok: false, error: "Backup record is required for restoration." };
@@ -487,13 +490,126 @@ export function createSheetBackupManager({
       return { ok: false, error: integrity.error };
     }
 
-    const requests = buildRestoreBatchUpdateRequests(backupRecord);
+    // Bind restoration to the original update journal when provided
+    let resolvedInsertedCol = insertedColumnIndex;
+    if (operationEntry) {
+      if (operationEntry.backupId && operationEntry.backupId !== backupRecord.backupId) {
+        return {
+          ok: false,
+          code: "BACKUP_JOURNAL_MISMATCH",
+          error: `Backup '${backupRecord.backupId}' does not match update journal backup '${operationEntry.backupId}'.`,
+        };
+      }
+      if (operationEntry.spreadsheetId && operationEntry.spreadsheetId !== backupRecord.spreadsheetId) {
+        return {
+          ok: false,
+          code: "BACKUP_JOURNAL_MISMATCH",
+          error: "Update journal spreadsheetId does not match backup spreadsheetId.",
+        };
+      }
+      if (resolvedInsertedCol === null || resolvedInsertedCol === undefined) {
+        if (Number.isInteger(operationEntry.insertedColumnIndex)) {
+          resolvedInsertedCol = operationEntry.insertedColumnIndex;
+        } else if (Array.isArray(operationEntry.requests)) {
+          const insReq = operationEntry.requests.find(
+            (r) => r?.insertDimension?.range?.dimension === "COLUMNS"
+          );
+          if (Number.isInteger(insReq?.insertDimension?.range?.startIndex)) {
+            resolvedInsertedCol = insReq.insertDimension.range.startIndex;
+          }
+        }
+      }
+    }
+
+    // Reconcile current live worksheet state if sheetReader is provided
+    const reconcileRequests = [];
+    const sheetId = Number(backupRecord.worksheetId);
+    let reconciledMerges = 0;
+    let reconciledConditionalFormats = 0;
+    let reconciledFilterViews = 0;
+
+    if (sheetReader && typeof sheetReader.readSheet === "function") {
+      const liveRead = await sheetReader.readSheet({
+        spreadsheetId: backupRecord.spreadsheetId,
+        worksheetId: backupRecord.worksheetId,
+        worksheetName: backupRecord.worksheetName,
+      });
+      if (!liveRead?.ok) {
+        return {
+          ok: false,
+          code: "LIVE_READ_FAILED",
+          error: `Unable to inspect current spreadsheet before restore: ${liveRead?.error || "Read failed"}`,
+        };
+      }
+      const liveStruct = liveRead.structure;
+      const origRowCount = (backupRecord.snapshotData?.displayValues || []).length;
+      const liveRowCount = (liveRead.displayRows || []).length;
+      if (origRowCount > 0 && liveRowCount !== origRowCount) {
+        return {
+          ok: false,
+          code: "COLLABORATOR_CHANGES_DETECTED",
+          error: `Row count changed since backup (${origRowCount} -> ${liveRowCount}), indicating collaborator edits. Restore blocked to prevent overwriting collaborator changes.`,
+        };
+      }
+
+      // Unmerge existing merges before restoring original merges
+      for (const m of liveStruct?.merges || []) {
+        reconcileRequests.push({
+          unmergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: m.startRowIndex,
+              endRowIndex: m.endRowIndex,
+              startColumnIndex: m.startColumnIndex,
+              endColumnIndex: m.endColumnIndex,
+            },
+          },
+        });
+        reconciledMerges += 1;
+      }
+
+      // Remove existing conditional formatting rules (reverse index order) before re-adding original rules
+      const liveCfCount = Array.isArray(liveStruct?.conditionalFormats)
+        ? liveStruct.conditionalFormats.length
+        : Number(liveStruct?.conditionalFormatCount || 0);
+      for (let i = liveCfCount - 1; i >= 0; i -= 1) {
+        reconcileRequests.push({
+          deleteConditionalFormatRule: { sheetId, index: i },
+        });
+        reconciledConditionalFormats += 1;
+      }
+
+      // Remove existing filterViews before re-adding original filterViews
+      for (const fv of liveRead.worksheet?.filterViews || []) {
+        if (fv?.filterViewId !== undefined) {
+          reconcileRequests.push({
+            deleteFilterView: { filterId: fv.filterViewId },
+          });
+          reconciledFilterViews += 1;
+        }
+      }
+    }
+
+    const baseRequests = buildRestoreBatchUpdateRequests(backupRecord, {
+      insertedColumnIndex: resolvedInsertedCol,
+    });
+    const requests = [...reconcileRequests, ...baseRequests];
+
+    const restorationEvidence = {
+      boundOperationId: operationEntry?.operationId || null,
+      insertedColumnReversed: Number.isInteger(resolvedInsertedCol) ? resolvedInsertedCol : null,
+      reconciledMerges,
+      reconciledConditionalFormats,
+      reconciledFilterViews,
+    };
+
     if (dryRun || mode === "dry-run" || !confirmedByUser) {
       return {
         ok: true,
         dryRun: true,
         requestsCount: requests.length,
         requests,
+        restorationEvidence,
         message: "Restoration plan verified (dry-run). Confirm explicitly to apply restore.",
       };
     }
@@ -508,7 +624,10 @@ export function createSheetBackupManager({
       mode,
       dryRun: false,
     });
-    return writeRes;
+    return {
+      ...writeRes,
+      restorationEvidence,
+    };
   }
 
   return {

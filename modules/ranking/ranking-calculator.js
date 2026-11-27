@@ -121,6 +121,24 @@ export function calculateOrganicRanking({
 
   const matched = flattened.find((entry) => entry.isTargetMatch) || null;
   if (matched) {
+    if (hasIncompletePage) {
+      return {
+        status: RANKING_STATUSES.INCOMPLETE_SEARCH,
+        position: null,
+        rankingUrl: null,
+        checkedResults: flattened.length,
+        actualVerifiedDepth: flattened.length,
+        extractedResultsCount,
+        verifiedPositionsCount: flattened.length,
+        uniqueUrlsCount: seenUrls.size,
+        requestedDepth: depth,
+        verifiedEndOfResults: false,
+        resultsTable: flattened,
+        errorDetails:
+          lastError ||
+          "Exact ranking position cannot be claimed because preceding SERP results or pagination were incomplete.",
+      };
+    }
     return {
       status: RANKING_STATUSES.RANKED,
       position: matched.position,

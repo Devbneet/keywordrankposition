@@ -207,43 +207,51 @@ export function createScheduledJobRunner({
       }
     }
 
-    const jobId = `sjob_${schedule.scheduleId}_${client.clientId}_${Date.now()}`;
-    const jobRecord = {
-      jobId,
-      clientId: client.clientId,
-      locationId: location.locationId,
-      locationName: location.locationName,
-      scheduleId: schedule.scheduleId,
-      executionId: execution.executionId,
-      websiteDomain: client.websiteDomain,
-      searchDepth: schedule.searchDepth || 50,
-      deviceType: location.deviceType || "Desktop",
-      isAuthorized: Boolean(schedule.isAuthorized),
-      state: JOB_STATES.RUNNING,
-      createdAt: now.toISOString(),
-      tasks: activeKeywords.map((kw, idx) => ({
-        taskId: `stask_${idx + 1}_${kw.keywordId || idx}`,
-        jobId,
-        clientId: client.clientId,
-        locationId: location.locationId,
-        locationName: location.locationName,
-        keywordId: kw.keywordId || null,
-        keyword: kw.keyword,
-        keywordGroup: kw.keywordGroup || "Default",
-        searchVolume: kw.searchVolume ?? "",
-        competition: kw.competition || "",
-        landingPage: kw.landingPage || "",
-        rowNumber: kw.rowPosition ?? null,
-        rowPosition: kw.rowPosition ?? null,
-        spreadsheetId: kw.spreadsheetId || client.sheetConfig?.spreadsheetId || null,
-        worksheetId: kw.worksheetId ?? client.sheetConfig?.worksheetId ?? null,
-        worksheetName: kw.worksheetName || client.sheetConfig?.worksheetName || null,
-        status: TASK_STATUSES.PENDING,
-        position: null,
-        rankingUrl: null,
-        isLiveVerified: false,
-      })),
-    };
+    const jobId = `sjob_${execution.executionId}_${client.clientId}`;
+    const existingJob =
+      typeof clientStorage.getJobRecord === "function" ? await clientStorage.getJobRecord(jobId) : null;
+    const jobRecord = existingJob
+      ? {
+          ...existingJob,
+          state: JOB_STATES.RUNNING,
+          isAuthorized: Boolean(schedule.isAuthorized),
+        }
+      : {
+          jobId,
+          clientId: client.clientId,
+          locationId: location.locationId,
+          locationName: location.locationName,
+          scheduleId: schedule.scheduleId,
+          executionId: execution.executionId,
+          websiteDomain: client.websiteDomain,
+          searchDepth: schedule.searchDepth || 50,
+          deviceType: location.deviceType || "Desktop",
+          isAuthorized: Boolean(schedule.isAuthorized),
+          state: JOB_STATES.RUNNING,
+          createdAt: now.toISOString(),
+          tasks: activeKeywords.map((kw, idx) => ({
+            taskId: `stask_${idx + 1}_${kw.keywordId || idx}`,
+            jobId,
+            clientId: client.clientId,
+            locationId: location.locationId,
+            locationName: location.locationName,
+            keywordId: kw.keywordId || null,
+            keyword: kw.keyword,
+            keywordGroup: kw.keywordGroup || "Default",
+            searchVolume: kw.searchVolume ?? "",
+            competition: kw.competition || "",
+            landingPage: kw.landingPage || "",
+            rowNumber: kw.rowPosition ?? null,
+            rowPosition: kw.rowPosition ?? null,
+            spreadsheetId: kw.spreadsheetId || client.sheetConfig?.spreadsheetId || null,
+            worksheetId: kw.worksheetId ?? client.sheetConfig?.worksheetId ?? null,
+            worksheetName: kw.worksheetName || client.sheetConfig?.worksheetName || null,
+            status: TASK_STATUSES.PENDING,
+            position: null,
+            rankingUrl: null,
+            isLiveVerified: false,
+          })),
+        };
     await clientStorage.saveJobRecord(jobRecord);
 
     const maxRetries = Number(schedule.retryPolicy?.maxKeywordRetries ?? RETRY_CONFIG.maxKeywordRetries);
@@ -307,15 +315,26 @@ export function createScheduledJobRunner({
         }
       }
 
+      if (typeof scheduleStorage.renewExecutionLock === "function") {
+        await scheduleStorage.renewExecutionLock(execution.executionId);
+      }
+
       task.status = outcome?.status || TASK_STATUSES.NETWORK_ERROR;
       task.position = typeof outcome?.position === "number" ? outcome.position : null;
       task.rankingUrl = outcome?.rankingUrl || null;
       task.checkedAt = new Date().toISOString();
       task.isLiveVerified = Boolean(outcome?.isLiveVerified);
       task.requestedDepth = jobRecord.searchDepth;
-      task.actualResultsChecked = Number(outcome?.actualResultsChecked ?? 0);
+      const verifiedDepth = Number(outcome?.actualVerifiedDepth ?? outcome?.actualResultsChecked ?? 0);
+      task.actualResultsChecked = verifiedDepth;
+      task.actualVerifiedDepth = verifiedDepth;
+      task.verifiedEndOfResults = Boolean(outcome?.verifiedEndOfResults);
       task.browserGpsVerification = outcome?.browserGpsVerification || null;
       task.googleLocationVerification = outcome?.googleLocationVerification || null;
+      task.googleLocationSource = outcome?.googleLocationSource || null;
+      task.googleLocationSourceType = outcome?.googleLocationSourceType || null;
+      task.sourceMode = outcome?.sourceMode || "live_bulk";
+      task.targetDomain = client.websiteDomain;
       task.errorDetails = outcome?.errorDetails || outcome?.error || null;
 
       // Persist each ranking result immediately after every completed keyword

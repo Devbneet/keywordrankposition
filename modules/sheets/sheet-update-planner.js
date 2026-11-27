@@ -118,6 +118,17 @@ export function buildSheetUpdatePlan({
     });
   }
 
+  if (rankUpdates.length === 0 && serpUpdates.length === 0) {
+    return {
+      ok: false,
+      status: "NO_ELIGIBLE_UPDATES",
+      error: "No eligible verified ranking or SERP updates to apply; physical column insertion skipped.",
+      errors: ["No eligible verified ranking or SERP updates to apply."],
+      warnings: safety.warnings,
+      beforeAfterRows,
+    };
+  }
+
   const worksheetId = normalizeWorksheetId(liveStructure.worksheetId);
   const requests = buildAtomicBatchUpdateRequests({
     worksheetId,

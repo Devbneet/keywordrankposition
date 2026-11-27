@@ -33,6 +33,31 @@ export function isTaskEligibleForLiveSheetWrite(task) {
   return { eligible: true };
 }
 
+const ALLOWED_LIVE_SOURCE_MODES = new Set(["live_google", "live_bulk", "live_single"]);
+
+export function hasPositiveCanonicalEvidence(task) {
+  if (!task || typeof task !== "object") return { ok: false, reason: "Missing task record." };
+  const sourceMode = task.sourceMode || task.source || "";
+  if (!ALLOWED_LIVE_SOURCE_MODES.has(sourceMode)) {
+    return { ok: false, reason: `Invalid or missing live sourceMode '${sourceMode || "none"}'.` };
+  }
+  const gpsStatus = task.browserGpsVerification || task.browserGpsStatus || "";
+  const googleStatus = task.googleLocationVerification || task.googleLocationStatus || task.locationVerificationStatus || "";
+  if (gpsStatus !== "GPS verified") {
+    return { ok: false, reason: `Missing positive browser GPS verification ('${gpsStatus || "none"}').` };
+  }
+  if (googleStatus !== "Google location matched") {
+    return { ok: false, reason: `Missing positive Google location verification ('${googleStatus || "none"}').` };
+  }
+  if (task.googleLocationSourceType !== "device") {
+    return { ok: false, reason: `Google location source must be 'device', got '${task.googleLocationSourceType || "none"}'.` };
+  }
+  if (task.isLiveVerified !== true) {
+    return { ok: false, reason: "Task isLiveVerified must be explicitly true." };
+  }
+  return { ok: true };
+}
+
 export function evaluateTaskUpdatePolicy({
   task,
   liveRow,
@@ -51,8 +76,16 @@ export function evaluateTaskUpdatePolicy({
     existingSameDateValue !== undefined;
 
   if (task.status === TASK_STATUSES.RANKED) {
+    const evidence = hasPositiveCanonicalEvidence(task);
+    if (!evidence.ok) {
+      return {
+        action: "SKIP_FAILED",
+        writeRank: false,
+        writeSerp: false,
+        reason: evidence.reason,
+      };
+    }
     if (
-      task.isLiveVerified !== true ||
       !Number.isInteger(task.position) ||
       task.position < 1 ||
       !task.rankingUrl ||
@@ -62,7 +95,7 @@ export function evaluateTaskUpdatePolicy({
         action: "SKIP_FAILED",
         writeRank: false,
         writeSerp: false,
-        reason: "Ranked task missing live verification flag, positive integer position, or valid HTTP/HTTPS ranking URL.",
+        reason: "Ranked task missing positive integer position or valid HTTP/HTTPS ranking URL.",
       };
     }
     const expectedDomain = task.targetDomain || task.clientDomain || "";
@@ -85,10 +118,19 @@ export function evaluateTaskUpdatePolicy({
   }
 
   if (task.status === TASK_STATUSES.NOT_FOUND) {
+    const evidence = hasPositiveCanonicalEvidence(task);
+    if (!evidence.ok) {
+      return {
+        action: "SKIP_FAILED",
+        writeRank: false,
+        writeSerp: false,
+        reason: evidence.reason,
+      };
+    }
     const requestedDepth = Number(task.requestedDepth) || 50;
     const checked = Number(task.actualVerifiedDepth ?? task.checkedResults ?? 0);
     const hasEndEvidence = Boolean(task.verifiedEndOfResults ?? task.endOfResultsVerified);
-    const depthConfirmed = task.isLiveVerified === true && (checked >= requestedDepth || hasEndEvidence);
+    const depthConfirmed = checked >= requestedDepth || hasEndEvidence;
     if (!depthConfirmed) {
       return {
         action: "SKIP_FAILED",
@@ -180,6 +222,23 @@ export function validatePrePlanSafety({
   const taskDecisions = [];
 
   for (const task of tasks) {
+    if (task.clientId && task.clientId !== client.clientId) {
+      errors.push(`Task row ${task.rowPosition} belongs to client '${task.clientId}', expected '${client.clientId}'.`);
+      continue;
+    }
+    if (location && task.locationId && task.locationId !== location.locationId) {
+      errors.push(`Task row ${task.rowPosition} belongs to location '${task.locationId}', expected '${location.locationId}'.`);
+      continue;
+    }
+    if (job.jobId && task.jobId && task.jobId !== job.jobId) {
+      errors.push(`Task row ${task.rowPosition} belongs to job '${task.jobId}', expected '${job.jobId}'.`);
+      continue;
+    }
+    const taskDomain = task.targetDomain || task.clientDomain || "";
+    if (client.websiteDomain && taskDomain && !isTargetDomainMatch({ resultUrl: `https://${taskDomain}`, targetDomain: client.websiteDomain })) {
+      errors.push(`Task row ${task.rowPosition} domain '${taskDomain}' does not match client domain '${client.websiteDomain}'.`);
+      continue;
+    }
     if (task.spreadsheetId && task.spreadsheetId !== liveStructure.spreadsheetId) {
       errors.push(`Task row ${task.rowPosition} belongs to spreadsheet '${task.spreadsheetId}', expected '${liveStructure.spreadsheetId}'.`);
       continue;

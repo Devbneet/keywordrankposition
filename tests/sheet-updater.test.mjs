@@ -211,6 +211,10 @@ test("end-to-end sheetUpdater enforces dry-run/sandbox, backup, structure drift 
       status: TASK_STATUSES.RANKED,
       position: 1,
       rankingUrl: "https://apexservices.example.com/emergency",
+      sourceMode: "live_bulk",
+      browserGpsStatus: "GPS verified",
+      googleLocationStatus: "Google location matched",
+      googleLocationSourceType: "device",
       isLiveVerified: true,
     },
   ];

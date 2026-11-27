@@ -74,6 +74,10 @@ test("update planner handles valid rankings, SERP updates, confirmed NA, CAPTCHA
       status: TASK_STATUSES.RANKED,
       position: 1,
       rankingUrl: "https://apexservices.example.com/emergency",
+      sourceMode: "live_bulk",
+      browserGpsStatus: "GPS verified",
+      googleLocationStatus: "Google location matched",
+      googleLocationSourceType: "device",
       isLiveVerified: true,
     },
     {
@@ -83,7 +87,12 @@ test("update planner handles valid rankings, SERP updates, confirmed NA, CAPTCHA
       keyword: "blocked drains sydney",
       status: TASK_STATUSES.NOT_FOUND,
       checkedResults: 50,
+      actualVerifiedDepth: 50,
       requestedDepth: 50,
+      sourceMode: "live_bulk",
+      browserGpsStatus: "GPS verified",
+      googleLocationStatus: "Google location matched",
+      googleLocationSourceType: "device",
       isLiveVerified: true,
     },
     {

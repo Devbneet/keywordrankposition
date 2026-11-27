@@ -14,6 +14,8 @@ import {
   RANKING_STATUSES,
 } from "../modules/ranking/ranking-state.js";
 import { createSingleKeywordChecker } from "../modules/ranking/single-keyword-checker.js";
+import { handleRuntimeMessage } from "../background/service-worker.js";
+import { MESSAGE_TYPES } from "../utils/messages.js";
 import { createClientManager } from "../modules/clients/client-manager.js";
 import { createClientStorage } from "../modules/clients/client-storage.js";
 import { createKeywordManager } from "../modules/clients/keyword-manager.js";
@@ -556,11 +558,27 @@ test("RC3 regression: sheet-update-validator uses canonical verifiedEndOfResults
       requestedDepth: 50,
       actualVerifiedDepth: 12,
       verifiedEndOfResults: true,
+      sourceMode: "live_bulk",
+      browserGpsStatus: "GPS verified",
+      googleLocationStatus: "Google location matched",
+      googleLocationSourceType: "device",
       isLiveVerified: true,
     },
   });
   assert.equal(notFoundCanonical.action, "WRITE_NA");
   assert.equal(notFoundCanonical.writeRank, true);
+
+  // isLiveVerified=true alone WITHOUT provenance & location evidence must be rejected
+  const unverifiedAlone = evaluateTaskUpdatePolicy({
+    task: {
+      status: TASK_STATUSES.RANKED,
+      position: 1,
+      rankingUrl: "https://example.com/",
+      isLiveVerified: true,
+    },
+  });
+  assert.equal(unverifiedAlone.action, "SKIP_FAILED");
+  assert.equal(unverifiedAlone.writeRank, false);
 
   const notFoundIncomplete = evaluateTaskUpdatePolicy({
     task: {
@@ -568,6 +586,10 @@ test("RC3 regression: sheet-update-validator uses canonical verifiedEndOfResults
       requestedDepth: 50,
       actualVerifiedDepth: 12,
       verifiedEndOfResults: false,
+      sourceMode: "live_bulk",
+      browserGpsStatus: "GPS verified",
+      googleLocationStatus: "Google location matched",
+      googleLocationSourceType: "device",
       isLiveVerified: true,
     },
   });
@@ -698,4 +720,59 @@ test("RC3 regression: scheduledJobRunner uses reporting timezone date & UPDATE_M
   assert.equal(rec.job.resumableFromCheckpoint, true);
   assert.equal(rec.job.completedCount, 1);
   assert.equal(rec.job.pendingCount, 1);
+});
+
+test("RC3 follow-up integration: service-worker sandbox registration, ranking-calculator incomplete preceding page rejection, and empty update planner guard", async () => {
+  const mem = createMemoryChromeStorage();
+  const mockChrome = {
+    storage: { local: mem },
+    runtime: {
+      getManifest: () => ({ version: "1.0.0", oauth2: { client_id: "123.apps.googleusercontent.com", scopes: [] } }),
+      getURL: (p) => `chrome-extension://test/${p}`,
+    },
+    tabs: {
+      onUpdated: { addListener() {}, removeListener() {} },
+      async query() { return []; },
+      async get() { return { id: 1, status: "complete" }; },
+      async create(o) { return { id: 1, status: "complete", ...o }; },
+      async update(id, o) { return { id, status: "complete", ...o }; },
+    },
+    debugger: {
+      async getTargets() { return []; },
+    },
+  };
+
+  // 1. Service worker persistent sandbox registration
+  const regRes = await handleRuntimeMessage(
+    {
+      type: MESSAGE_TYPES.SHEETS_REGISTER_SANDBOX,
+      payload: { spreadsheetId: "1SandboxSheetIdForTesting12345", label: "Copied Client Sheet" },
+    },
+    null,
+    mockChrome
+  );
+  assert.equal(regRes.ok, true);
+  const listRes = await handleRuntimeMessage({ type: MESSAGE_TYPES.SHEETS_LIST_SANDBOX }, null, mockChrome);
+  assert.equal(listRes.ok, true);
+  assert.equal(listRes.sandboxSheets.length, 1);
+  assert.equal(listRes.sandboxSheets[0].spreadsheetId, "1SandboxSheetIdForTesting12345");
+
+  // 2. ranking-calculator rejects exact ranking position when preceding page was incomplete
+  const unreliablePos = calculateOrganicRanking({
+    pages: [
+      {
+        pageNumber: 1,
+        incompleteReason: "Page 1 failed mid-load",
+        results: [{ title: "Other", url: "https://other.org/" }],
+      },
+      {
+        pageNumber: 2,
+        results: [{ title: "Target", url: "https://target.example.com/" }],
+      },
+    ],
+    targetDomain: "target.example.com",
+    requestedDepth: 20,
+  });
+  assert.equal(unreliablePos.status, RANKING_STATUSES.INCOMPLETE_SEARCH);
+  assert.equal(unreliablePos.position, null);
 });

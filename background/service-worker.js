@@ -75,13 +75,25 @@ function getOrCreateServices(chromeApi) {
     jobManager,
   });
 
+  const SANDBOX_REGISTRY_KEY = "dm_trusted_sandbox_sheets";
+  async function loadTrustedSandboxList() {
+    const res = await storage.get(SANDBOX_REGISTRY_KEY);
+    return Array.isArray(res?.[SANDBOX_REGISTRY_KEY]) ? res[SANDBOX_REGISTRY_KEY] : [];
+  }
+
   const googleAuthClient = createGoogleAuthClient({
     identityApi: chromeApi?.identity,
     runtimeApi: chromeApi?.runtime,
     storageClient: storage,
   });
   const sheetsApiClient = createSheetsApiClient({ authClient: googleAuthClient });
-  const sheetsWriteClient = createSheetsWriteClient({ authClient: googleAuthClient });
+  const sheetsWriteClient = createSheetsWriteClient({
+    authClient: googleAuthClient,
+    isSandboxSpreadsheetAllowed: async (spreadsheetId) => {
+      const list = await loadTrustedSandboxList();
+      return list.some((entry) => entry?.spreadsheetId === spreadsheetId);
+    },
+  });
   const sheetReader = createSheetReader({ sheetsApiClient, clientStorage });
   const sheetBackupManager = createSheetBackupManager({ sheetsApiClient, storageClient: storage });
   const updateJournal = createUpdateJournal({ clientStorage });
@@ -226,6 +238,8 @@ function getOrCreateServices(chromeApi) {
 
   const bundle = {
     storage,
+    SANDBOX_REGISTRY_KEY,
+    loadTrustedSandboxList,
     searchLock,
     locationController,
     rankingChecker,
@@ -271,6 +285,8 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
   const version = chromeApi?.runtime?.getManifest?.().version || "0.1.0";
   const {
     storage,
+    SANDBOX_REGISTRY_KEY,
+    loadTrustedSandboxList,
     locationController,
     rankingChecker,
     jobManager,
@@ -713,15 +729,51 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
         journal: await clientStorage.listUpdateJournalByClient(message.payload?.clientId),
       };
 
+    case MESSAGE_TYPES.SHEETS_REGISTER_SANDBOX: {
+      const p = message.payload || {};
+      const sid = String(p.spreadsheetId || "").trim();
+      if (!sid || !/^[a-zA-Z0-9-_]{10,}$/.test(sid)) {
+        return { ok: false, error: "Valid Google Spreadsheet ID is required to register a sandbox sheet." };
+      }
+      const list = await loadTrustedSandboxList();
+      const filtered = list.filter((e) => e?.spreadsheetId !== sid);
+      const entry = {
+        spreadsheetId: sid,
+        label: String(p.label || "Authorized Sandbox Sheet").trim(),
+        registeredAt: new Date().toISOString(),
+      };
+      const next = [entry, ...filtered];
+      await storage.set({ [SANDBOX_REGISTRY_KEY]: next });
+      await activityLogger.logEvent({
+        category: LOG_CATEGORIES.SHEET_SYNC,
+        level: "info",
+        message: `Registered trusted sandbox spreadsheet '${sid}'.`,
+      });
+      return { ok: true, entry, sandboxSheets: next };
+    }
+
+    case MESSAGE_TYPES.SHEETS_LIST_SANDBOX: {
+      const list = await loadTrustedSandboxList();
+      return { ok: true, sandboxSheets: list };
+    }
+
     case MESSAGE_TYPES.SHEETS_BACKUP_RESTORE: {
       const p = message.payload || {};
       const bkp = await sheetBackupManager.getBackup(p.backupId);
+      const journalList = bkp?.clientId ? await clientStorage.listUpdateJournalByClient(bkp.clientId) : [];
+      const operationEntry =
+        (p.operationId && journalList.find((j) => j.operationId === p.operationId)) ||
+        journalList.find((j) => j.backupId === p.backupId) ||
+        null;
       const res = await sheetBackupManager.restoreFromBackup({
         backupRecord: bkp,
+        operationEntry,
+        sheetReader,
         writeClient: sheetsWriteClient,
         mode: p.mode || "dry-run",
         dryRun: p.dryRun !== false,
         confirmedByUser: Boolean(p.confirmedByUser),
+        insertedColumnIndex: p.insertedColumnIndex ?? null,
       });
       await activityLogger.logEvent({
         category: LOG_CATEGORIES.RECOVERY,

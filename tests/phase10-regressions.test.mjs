@@ -128,6 +128,10 @@ test("Phase 10 fix: backup verification requires contentIntegrityHash, non-null 
       status: TASK_STATUSES.RANKED,
       position: 2,
       rankingUrl: "https://apexservices.example.com/emergency",
+      sourceMode: "live_bulk",
+      browserGpsStatus: "GPS verified",
+      googleLocationStatus: "Google location matched",
+      googleLocationSourceType: "device",
       isLiveVerified: true,
     },
   ];
