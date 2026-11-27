@@ -685,6 +685,41 @@
                   <button id="btn-bulk-clear" class="btn-outline btn-reset" type="button">Clear Results</button>
                 </div>
               </div>
+              <div id="assisted-workflow-panel" class="status-panel" style="margin-top: 16px;">
+                <div class="card-header" style="margin-bottom: 8px;">
+                  <div>
+                    <h3>Sequential Assisted Workflow (1 Keyword at a Time)</h3>
+                    <p class="muted">Processes one keyword at a time on one dedicated tab (up to 50 results), stops on match or CAPTCHA, and reuses the same reporting date column.</p>
+                  </div>
+                  <span id="ast-status-pill" class="pill pill-neutral">Idle</span>
+                </div>
+                <div class="metrics-grid">
+                  <div class="summary-chip"><span class="summary-label">Current Keyword</span><span id="ast-current-kw" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Search Page</span><span id="ast-current-page" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Organic Checked</span><span id="ast-checked-count" class="summary-val">0 / 50</span></div>
+                  <div class="summary-chip"><span class="summary-label">Ranking Position</span><span id="ast-rank-pos" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Ranking URL</span><span id="ast-rank-url" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Location Status</span><span id="ast-loc-status" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Google Sheets</span><span id="ast-sheet-status" class="summary-val">-</span></div>
+                  <div class="summary-chip"><span class="summary-label">Completed / Remaining</span><span id="ast-progress-counts" class="summary-val">0 / 0</span></div>
+                </div>
+                <div class="actions" style="margin: 8px 0;">
+                  <label class="checkbox-inline"><input id="ast-auto-sheet" type="checkbox" checked /> Prepare/update Google Sheet row (same reporting date column)</label>
+                  <select id="ast-sheet-mode" class="inline-input" style="max-width: 180px;">
+                    <option value="dry-run" selected>Dry-Run Preview Only</option>
+                    <option value="sandbox">Sandbox Sheet Write</option>
+                  </select>
+                </div>
+                <div id="ast-feedback" class="feedback-banner hidden" role="alert"></div>
+                <div class="button-bar">
+                  <button id="btn-ast-start" class="btn-navy" type="button">Start Assisted</button>
+                  <button id="btn-ast-inspect" class="btn-outline" type="button" disabled>Inspect Current Page</button>
+                  <button id="btn-ast-next" class="btn-outline" type="button" disabled>Next Keyword</button>
+                  <button id="btn-ast-pause" class="btn-outline" type="button" disabled>Pause</button>
+                  <button id="btn-ast-resume" class="btn-outline" type="button" disabled>Resume</button>
+                  <button id="btn-ast-stop" class="btn-outline" type="button" disabled>Stop</button>
+                </div>
+              </div>
               <div id="bulk-progress-panel" class="status-panel">
                 <div class="metrics-grid">
                   <div class="summary-chip"><span class="summary-label">Total</span><span id="bulk-m-total" class="summary-val">0</span></div>

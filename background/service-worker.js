@@ -6,6 +6,7 @@ import { createLocationManager } from "../modules/clients/location-manager.js";
 import { createJobManager } from "../modules/jobs/job-manager.js";
 import { JOB_STATES, TASK_STATUSES } from "../modules/jobs/job-state.js";
 import { createJobStorage } from "../modules/jobs/job-storage.js";
+import { createSequentialAssistedRunner } from "../modules/jobs/sequential-assisted-runner.js";
 import { createGeolocationController } from "../modules/location/geolocation-controller.js";
 import { createHistoryStorage } from "../modules/history/history-storage.js";
 import { buildCurrentAndPreviousSnapshots, buildKeywordTrendSeries, compareTwoReportingDates } from "../modules/history/ranking-history.js";
@@ -108,6 +109,16 @@ function getOrCreateServices(chromeApi) {
     locationManager,
   });
   const historyStorage = createHistoryStorage({ storageClient: storage });
+  const sequentialAssistedRunner = createSequentialAssistedRunner({
+    chromeApi,
+    storageClient: storage,
+    locationController,
+    clientStorage,
+    historyStorage,
+    sheetUpdater,
+    sheetBackupManager,
+    searchLock,
+  });
   const activityLogger = createActivityLogger({ storageClient: storage });
   const scheduleStorage = createScheduleStorage({ storageClient: storage });
   const alarmController = createAlarmController({ alarmsApi: chromeApi?.alarms || null });
@@ -245,6 +256,7 @@ function getOrCreateServices(chromeApi) {
     rankingChecker,
     jobStorage,
     jobManager,
+    sequentialAssistedRunner,
     clientStorage,
     locationManager,
     keywordManager,
@@ -290,6 +302,7 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
     locationController,
     rankingChecker,
     jobManager,
+    sequentialAssistedRunner,
     clientStorage,
     locationManager,
     keywordManager,
@@ -419,6 +432,27 @@ export async function handleRuntimeMessage(message, _sender, chromeApi = globalT
 
     case MESSAGE_TYPES.BULK_GET_STATUS:
       return jobManager.getStatus();
+
+    case MESSAGE_TYPES.ASSISTED_GET_STATUS:
+      return sequentialAssistedRunner.getStatus();
+
+    case MESSAGE_TYPES.ASSISTED_START:
+      return sequentialAssistedRunner.startSession(message.payload || {});
+
+    case MESSAGE_TYPES.ASSISTED_INSPECT_PAGE:
+      return sequentialAssistedRunner.inspectCurrentTabPage(message.payload || {});
+
+    case MESSAGE_TYPES.ASSISTED_NEXT_KEYWORD:
+      return sequentialAssistedRunner.nextKeyword();
+
+    case MESSAGE_TYPES.ASSISTED_PAUSE:
+      return sequentialAssistedRunner.pauseSession();
+
+    case MESSAGE_TYPES.ASSISTED_RESUME:
+      return sequentialAssistedRunner.resumeSession();
+
+    case MESSAGE_TYPES.ASSISTED_STOP:
+      return sequentialAssistedRunner.stopSession();
 
     case MESSAGE_TYPES.BULK_START: {
       const res = await jobManager.startJob(message.payload || {});

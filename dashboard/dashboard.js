@@ -175,6 +175,24 @@ const bulkStopBtn = document.getElementById("btn-bulk-stop");
 const bulkRetryBtn = document.getElementById("btn-bulk-retry");
 const bulkExportBtn = document.getElementById("btn-bulk-export");
 const bulkClearBtn = document.getElementById("btn-bulk-clear");
+const astStatusPillEl = document.getElementById("ast-status-pill");
+const astCurrentKwEl = document.getElementById("ast-current-kw");
+const astCurrentPageEl = document.getElementById("ast-current-page");
+const astCheckedCountEl = document.getElementById("ast-checked-count");
+const astRankPosEl = document.getElementById("ast-rank-pos");
+const astRankUrlEl = document.getElementById("ast-rank-url");
+const astLocStatusEl = document.getElementById("ast-loc-status");
+const astSheetStatusEl = document.getElementById("ast-sheet-status");
+const astProgressCountsEl = document.getElementById("ast-progress-counts");
+const astAutoSheetChk = document.getElementById("ast-auto-sheet");
+const astSheetModeSelect = document.getElementById("ast-sheet-mode");
+const astFeedbackEl = document.getElementById("ast-feedback");
+const astStartBtn = document.getElementById("btn-ast-start");
+const astInspectBtn = document.getElementById("btn-ast-inspect");
+const astNextBtn = document.getElementById("btn-ast-next");
+const astPauseBtn = document.getElementById("btn-ast-pause");
+const astResumeBtn = document.getElementById("btn-ast-resume");
+const astStopBtn = document.getElementById("btn-ast-stop");
 const bulkMTotalEl = document.getElementById("bulk-m-total");
 const bulkMCompletedEl = document.getElementById("bulk-m-completed");
 const bulkMPendingEl = document.getElementById("bulk-m-pending");
@@ -716,6 +734,100 @@ bulkStopBtn.addEventListener("click", async () => { await chrome.runtime.sendMes
 bulkRetryBtn.addEventListener("click", async () => { const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.BULK_RETRY_FAILED }); if (res?.job) renderBulkJobState({ job: res.job, tasks: res.tasks || [], isBusy: false }); });
 bulkExportBtn.addEventListener("click", () => { if (latestBulkState.tasks?.length) downloadTextFile("bulk-keyword-rankings.csv", exportBulkResultsCsv(latestBulkState.job, latestBulkState.tasks), "text/csv;charset=utf-8"); });
 bulkClearBtn.addEventListener("click", async () => { await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.BULK_CLEAR }); renderBulkJobState({ job: null, tasks: [], isBusy: false }); });
+
+function renderAssistedSession(session) {
+  if (!astStatusPillEl) return;
+  if (!session) {
+    setPill(astStatusPillEl, "neutral", "Idle");
+    astCurrentKwEl.textContent = "-";
+    astCurrentPageEl.textContent = "-";
+    astCheckedCountEl.textContent = "0 / 50";
+    astRankPosEl.textContent = "-";
+    astRankUrlEl.textContent = "-";
+    astLocStatusEl.textContent = "-";
+    astSheetStatusEl.textContent = "-";
+    astProgressCountsEl.textContent = "0 / 0";
+    astStartBtn.disabled = false;
+    astInspectBtn.disabled = true;
+    astNextBtn.disabled = true;
+    astPauseBtn.disabled = true;
+    astResumeBtn.disabled = true;
+    astStopBtn.disabled = true;
+    return;
+  }
+  const st = session.status || "Idle";
+  const isFinished = st === "Completed" || st === "Stopped";
+  const isPaused = st === "Paused" || st.includes("CAPTCHA");
+  const isReadyNext = st === "Target website found" || st === "Keyword completed";
+  const isAwaiting = st === "Awaiting search / page inspection";
+
+  setPill(astStatusPillEl, st.includes("CAPTCHA") ? "error" : isReadyNext || st === "Completed" ? "healthy" : isPaused ? "warn" : "pending", st);
+  const curTask = session.queue?.[session.currentIndex] || null;
+  const completedCount = (session.queue || []).filter((q) => q.status === "Ranked" || q.status === "Not found").length;
+  const remainingCount = Math.max(0, (session.queue || []).length - completedCount);
+
+  astCurrentKwEl.textContent = curTask?.keyword || "-";
+  astCurrentPageEl.textContent = String(session.currentPageNumber || 1);
+  astCheckedCountEl.textContent = `${session.checkedResults || 0} / ${session.searchDepth || 50}`;
+  astRankPosEl.textContent = typeof session.currentPosition === "number" ? `#${session.currentPosition}` : "-";
+  astRankUrlEl.textContent = session.currentRankingUrl || "-";
+  astLocStatusEl.textContent = session.locationStatusLabel || "-";
+  astSheetStatusEl.textContent = session.sheetUpdateStatus || "-";
+  astProgressCountsEl.textContent = `${completedCount} / ${remainingCount}`;
+
+  astStartBtn.disabled = !isFinished && st !== "Idle";
+  astInspectBtn.disabled = !isAwaiting;
+  astNextBtn.disabled = !isReadyNext;
+  astPauseBtn.disabled = !isAwaiting && !isReadyNext;
+  astResumeBtn.disabled = !isPaused;
+  astStopBtn.disabled = isFinished;
+
+  if (session.lastError) setBanner(astFeedbackEl, "error", session.lastError);
+  else if (session.manualInstruction) setBanner(astFeedbackEl, "info", session.manualInstruction);
+}
+
+astStartBtn?.addEventListener("click", async () => {
+  const entries = parsedBulkQueueInput || parseKeywordTextInput(bulkKeywordsInput.value);
+  if (entries.length === 0) return setBanner(astFeedbackEl, "error", "Load or select at least one keyword first.");
+  const ws = clientsPage.getActiveWorkspace();
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.ASSISTED_START,
+    payload: {
+      clientId: ws?.client?.clientId || null,
+      locationId: ws?.selectedLocation?.locationId || null,
+      keywords: entries,
+      searchDepth: Math.min(50, Number(rankDepthSelect.value) || 50),
+      autoUpdateSheet: Boolean(astAutoSheetChk?.checked),
+      sheetMode: astSheetModeSelect?.value || "dry-run",
+      isAuthorized: Boolean(bulkAuthorizedChk?.checked),
+    },
+  });
+  if (res?.session) renderAssistedSession(res.session);
+  if (!res?.ok) setBanner(astFeedbackEl, "error", res?.error || "Failed starting sequential assisted session.");
+});
+astInspectBtn?.addEventListener("click", async () => {
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.ASSISTED_INSPECT_PAGE });
+  if (res?.session) renderAssistedSession(res.session);
+  if (!res?.ok && res?.error) setBanner(astFeedbackEl, "error", res.error);
+});
+astNextBtn?.addEventListener("click", async () => {
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.ASSISTED_NEXT_KEYWORD });
+  if (res?.session) renderAssistedSession(res.session);
+  if (!res?.ok && res?.error) setBanner(astFeedbackEl, "error", res.error);
+});
+astPauseBtn?.addEventListener("click", async () => {
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.ASSISTED_PAUSE });
+  if (res?.session) renderAssistedSession(res.session);
+});
+astResumeBtn?.addEventListener("click", async () => {
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.ASSISTED_RESUME });
+  if (res?.session) renderAssistedSession(res.session);
+  if (!res?.ok && res?.error) setBanner(astFeedbackEl, "error", res.error);
+});
+astStopBtn?.addEventListener("click", async () => {
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.ASSISTED_STOP });
+  if (res?.session) renderAssistedSession(res.session);
+});
 
 // Google Sheets Events
 sheetsConnectBtn.addEventListener("click", async () => { const r = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SHEETS_CONNECT }); await refreshGoogleAuthStatus(); setBanner(sheetsFeedbackEl, r.ok ? "success" : "error", r.ok ? "Connected." : r.error); });
