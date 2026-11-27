@@ -68,7 +68,7 @@ export function createJobManager({
     clientId = null,
     locationId = null,
     keywordSnapshots = null,
-    isAuthorized = true,
+    isAuthorized = false,
   } = {}) {
     if (startLock || runner.isBusy()) {
       return { ok: false, error: "A bulk ranking job is already running." };
@@ -140,6 +140,7 @@ export function createJobManager({
           : queue.map((t) => ({ keyword: t.keyword, rowPosition: t.rowPosition })),
         requestedDepth: depth,
         deviceType: String(deviceType || "Desktop"),
+        isAuthorized: Boolean(isAuthorized),
         totalKeywords: queue.length,
         currentKeyword: null,
         createdAt: new Date().toISOString(),

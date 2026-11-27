@@ -269,7 +269,7 @@ test("live ranking check paginates to position 20 and enforces verified location
   const unverified = await handleRuntimeMessage(
     {
       type: MESSAGE_TYPES.RANKING_CHECK,
-      payload: { websiteDomain: "pos20.example.com", keyword: "seo agency sydney", searchDepth: 20 },
+      payload: { websiteDomain: "pos20.example.com", keyword: "seo agency sydney", searchDepth: 20, isAuthorized: true },
     },
     null,
     mockChrome
@@ -284,7 +284,7 @@ test("live ranking check paginates to position 20 and enforces verified location
   const ranked = await handleRuntimeMessage(
     {
       type: MESSAGE_TYPES.RANKING_CHECK,
-      payload: { websiteDomain: "pos20.example.com", keyword: "seo agency sydney", searchDepth: 20 },
+      payload: { websiteDomain: "pos20.example.com", keyword: "seo agency sydney", searchDepth: 20, isAuthorized: true },
     },
     null,
     mockChrome
@@ -309,7 +309,7 @@ test("distinguishes incomplete search, empty results, CAPTCHA, location mismatch
   const incompleteRes = await handleRuntimeMessage(
     {
       type: MESSAGE_TYPES.RANKING_CHECK,
-      payload: { websiteDomain: "notfound.org", keyword: "missing site", searchDepth: 20 },
+      payload: { websiteDomain: "notfound.org", keyword: "missing site", searchDepth: 20, isAuthorized: true },
     },
     null,
     incompleteChrome
@@ -394,7 +394,7 @@ test("distinguishes incomplete search, empty results, CAPTCHA, location mismatch
   const mismatchRes = await handleRuntimeMessage(
     {
       type: MESSAGE_TYPES.RANKING_CHECK,
-      payload: { websiteDomain: "example.com", keyword: "seo", searchDepth: 10 },
+      payload: { websiteDomain: "example.com", keyword: "seo", searchDepth: 10, isAuthorized: true },
     },
     null,
     mismatchChrome
@@ -407,7 +407,7 @@ test("distinguishes incomplete search, empty results, CAPTCHA, location mismatch
   const detachRes = await handleRuntimeMessage(
     {
       type: MESSAGE_TYPES.RANKING_CHECK,
-      payload: { websiteDomain: "example.com", keyword: "seo", searchDepth: 10 },
+      payload: { websiteDomain: "example.com", keyword: "seo", searchDepth: 10, isAuthorized: true },
     },
     null,
     detachChrome
@@ -445,6 +445,7 @@ test("distinguishes incomplete search, empty results, CAPTCHA, location mismatch
     websiteDomain: "pos20.example.com",
     keyword: "seo",
     searchDepth: 20,
+    isAuthorized: true,
   });
   assert.equal(stoppedRes.result.status, RANKING_STATUSES.STOPPED_BY_USER);
 });

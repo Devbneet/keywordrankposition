@@ -4,16 +4,30 @@
  */
 
 import { TASK_STATUSES } from "../jobs/job-state.js";
+import { isTargetDomainMatch } from "../ranking/domain-matcher.js";
 import { validateCrossClientSheetConfigurations, validateLocationWorksheetIsolation } from "./sheet-range-validator.js";
 import { compareSnapshotWithStructure } from "./sheet-snapshot.js";
 import { normalizeWorksheetId } from "./spreadsheet-validator.js";
 
+function isValidHttpUrl(raw) {
+  try {
+    const parsed = new URL(String(raw || "").trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export function isTaskEligibleForLiveSheetWrite(task) {
   if (!task) return { eligible: false, reason: "Missing task record." };
-  if (task.source === "manual_html" || task.useManualHtml) {
+  if (
+    task.source === "manual_html" ||
+    task.sourceMode === "manual_html" ||
+    task.useManualHtml
+  ) {
     return { eligible: false, reason: "Manual HTML test results cannot be written to live client sheets." };
   }
-  if (task.isMock || task.isAccuracyFixture) {
+  if (task.source === "mock" || task.sourceMode === "mock" || task.isMock || task.isAccuracyFixture) {
     return { eligible: false, reason: "Mock or Accuracy Lab fixture results cannot be written to live client sheets." };
   }
   return { eligible: true };
@@ -37,12 +51,27 @@ export function evaluateTaskUpdatePolicy({
     existingSameDateValue !== undefined;
 
   if (task.status === TASK_STATUSES.RANKED) {
-    if (!task.isLiveVerified || typeof task.position !== "number" || task.position < 1 || !task.rankingUrl) {
+    if (
+      task.isLiveVerified !== true ||
+      !Number.isInteger(task.position) ||
+      task.position < 1 ||
+      !task.rankingUrl ||
+      !isValidHttpUrl(task.rankingUrl)
+    ) {
       return {
         action: "SKIP_FAILED",
         writeRank: false,
         writeSerp: false,
-        reason: "Ranked task missing live verification flag, positive integer position, or ranking URL.",
+        reason: "Ranked task missing live verification flag, positive integer position, or valid HTTP/HTTPS ranking URL.",
+      };
+    }
+    const expectedDomain = task.targetDomain || task.clientDomain || "";
+    if (expectedDomain && !isTargetDomainMatch({ resultUrl: task.rankingUrl, targetDomain: expectedDomain })) {
+      return {
+        action: "SKIP_FAILED",
+        writeRank: false,
+        writeSerp: false,
+        reason: `Ranking URL '${task.rankingUrl}' does not match target domain '${expectedDomain}'.`,
       };
     }
     return {

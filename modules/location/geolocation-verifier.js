@@ -67,12 +67,28 @@ function buildGeolocationProbeExpression(timeoutMs) {
         permissionStatus = "unknown";
       }
     }
+    if (!window.isSecureContext) {
+      return {
+        ok: false,
+        code: "INSECURE_CONTEXT",
+        permissionStatus,
+        error: "Geolocation requires a secure HTTPS context."
+      };
+    }
     if (!navigator.geolocation) {
       return {
         ok: false,
         code: "UNSUPPORTED",
         permissionStatus,
         error: "navigator.geolocation is unavailable in this page."
+      };
+    }
+    if (permissionStatus === "denied") {
+      return {
+        ok: false,
+        code: "SITE_PERMISSION_BLOCKED",
+        permissionStatus: "denied",
+        error: "Site-level geolocation permission is blocked for this origin in Chrome. Open the dedicated tab, allow Location access in Chrome's site settings, then reapply and retest."
       };
     }
     return await new Promise((resolve) => {
@@ -84,12 +100,21 @@ function buildGeolocationProbeExpression(timeoutMs) {
           longitude: pos.coords.longitude,
           accuracy: pos.coords.accuracy
         }),
-        (err) => resolve({
-          ok: false,
-          code: err.code === 1 ? "PERMISSION_DENIED" : "POSITION_ERROR",
-          permissionStatus: err.code === 1 ? "denied" : permissionStatus,
-          error: err.message || "Geolocation lookup failed."
-        }),
+        (err) => {
+          const code = err.code === 1
+            ? (permissionStatus === "prompt" ? "PERMISSION_PROMPT_DENIED" : "USER_DENIED_PERMISSION")
+            : err.code === 2
+              ? "POSITION_UNAVAILABLE"
+              : err.code === 3
+                ? "POSITION_TIMEOUT"
+                : "POSITION_ERROR";
+          resolve({
+            ok: false,
+            code,
+            permissionStatus: err.code === 1 ? "denied" : permissionStatus,
+            error: err.message || "Geolocation lookup failed."
+          });
+        },
         { enableHighAccuracy: true, timeout: ${Math.max(1000, Number(timeoutMs) || 10000)}, maximumAge: 0 }
       );
     });
@@ -159,15 +184,28 @@ export async function verifyBrowserGeolocation({
   }
 
   if (!probe.ok) {
-    const denied = probe.code === "PERMISSION_DENIED" || probe.permissionStatus === "denied";
+    const denied =
+      probe.code === "PERMISSION_DENIED" ||
+      probe.code === "USER_DENIED_PERMISSION" ||
+      probe.code === "PERMISSION_PROMPT_DENIED" ||
+      probe.code === "SITE_PERMISSION_BLOCKED" ||
+      probe.permissionStatus === "denied";
     return {
       state: denied ? LOCATION_STATES.PERMISSION_DENIED : LOCATION_STATES.VERIFICATION_FAILED,
       permissionStatus: probe.permissionStatus || (denied ? "denied" : "unknown"),
+      permissionErrorCode: probe.code || (denied ? "PERMISSION_DENIED" : "VERIFICATION_FAILED"),
       reportedCoords: null,
       latitudeDelta: null,
       longitudeDelta: null,
       lastVerifiedAt: checkedAt,
       lastError: probe.error || "Geolocation verification failed.",
+      recoverySteps: denied
+        ? [
+            "Open the dedicated verification/Google tab.",
+            "Click the site settings (lock/tune) icon in Chrome's address bar and set Location to Allow for that origin.",
+            "Click Apply Browser Location, then Retest GPS and Verify Google Location.",
+          ]
+        : [],
       limitationNote: BROWSER_GPS_LIMITATION_NOTE,
     };
   }

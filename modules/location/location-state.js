@@ -20,6 +20,8 @@ export const LOCATION_STATES = Object.freeze({
 export const GOOGLE_LOCATION_STATUSES = Object.freeze({
   UNVERIFIED: "Unverified",
   MATCHED: "Google location matched",
+  NON_DEVICE_MATCH: "Non-device location match",
+  AMBIGUOUS: "Ambiguous location match",
   MISMATCH: "Google location mismatch",
   UNAVAILABLE: "Google location unavailable",
   SEARCH_BLOCKED: "Search blocked",
@@ -27,17 +29,61 @@ export const GOOGLE_LOCATION_STATUSES = Object.freeze({
   VERIFICATION_FAILED: "Verification failed",
 });
 
+export const GOOGLE_LOCATION_SOURCES = Object.freeze({
+  DEVICE: "device",
+  IP: "ip",
+  PLACES: "places",
+  ACTIVITY: "activity",
+  UNKNOWN: "unknown",
+  UNAVAILABLE: "unavailable",
+});
+
+export const GOOGLE_MATCH_CLASSIFICATIONS = Object.freeze({
+  DEVICE_CITY: "Device-based city match",
+  DEVICE_REGION: "Device-based region match",
+  IP_CITY: "IP-based city match",
+  PLACES_CITY: "Saved places match",
+  ACTIVITY_CITY: "Previous activity match",
+  COUNTRY_ONLY: "Country-only match",
+  MISMATCH: "Location mismatch",
+  AMBIGUOUS: "Ambiguous match",
+  UNVERIFIED: "Unverified location",
+});
+
 export const LOCATION_STORAGE_KEY = "dm_location_session";
+
+export function computeLocationConfigFingerprint(config) {
+  if (!config || typeof config !== "object") return null;
+  const parts = [
+    config.clientId ?? "",
+    config.locationId ?? "",
+    config.locationName ?? "",
+    config.targetCity ?? "",
+    config.targetState ?? "",
+    config.country ?? "",
+    config.language ?? "",
+    config.googleDomain ?? "",
+    config.latitude ?? "",
+    config.longitude ?? "",
+    config.accuracy ?? "",
+    config.deviceType ?? "",
+  ];
+  return parts.map((v) => String(v).trim()).join("|");
+}
 
 export function createDefaultLocationState() {
   return {
     state: LOCATION_STATES.NOT_CONFIGURED,
     browserGpsStatus: LOCATION_STATES.NOT_CONFIGURED,
     config: null,
+    configFingerprint: null,
+    clientId: null,
+    locationId: null,
     tabId: null,
     tabUrl: null,
     debuggerAttached: false,
     permissionStatus: "unknown",
+    permissionErrorCode: null,
     reportedCoords: null,
     latitudeDelta: null,
     longitudeDelta: null,
@@ -45,8 +91,10 @@ export function createDefaultLocationState() {
     googleLocationStatus: GOOGLE_LOCATION_STATUSES.UNVERIFIED,
     googleDetectedLocation: null,
     googleLocationSource: null,
-    googleLocationSourceType: null,
+    googleLocationSourceType: GOOGLE_LOCATION_SOURCES.UNAVAILABLE,
     googleMatchType: "none",
+    googleMatchClassification: GOOGLE_MATCH_CLASSIFICATIONS.UNVERIFIED,
+    strictRankingEligible: false,
     googleLastVerifiedAt: null,
     googleVerificationEvidence: null,
     lastError: null,
@@ -68,14 +116,18 @@ export function normalizeUrlForComparison(url) {
 export function hasConfigChanged(prevConfig, nextConfig) {
   if (!prevConfig || !nextConfig) return true;
   const keys = [
+    "clientId",
+    "locationId",
     "locationName",
     "latitude",
     "longitude",
     "accuracy",
     "targetCity",
+    "targetState",
     "country",
     "language",
     "googleDomain",
+    "deviceType",
     "testPageUrl",
   ];
   return keys.some((key) => String(prevConfig[key] ?? "") !== String(nextConfig[key] ?? ""));
@@ -89,6 +141,7 @@ export function clearVerificationFields(state, { preserveTab = true } = {}) {
     tabUrl: preserveTab ? state.tabUrl : null,
     debuggerAttached: preserveTab ? state.debuggerAttached : false,
     permissionStatus: "unknown",
+    permissionErrorCode: null,
     reportedCoords: null,
     latitudeDelta: null,
     longitudeDelta: null,
@@ -96,8 +149,10 @@ export function clearVerificationFields(state, { preserveTab = true } = {}) {
     googleLocationStatus: GOOGLE_LOCATION_STATUSES.UNVERIFIED,
     googleDetectedLocation: null,
     googleLocationSource: null,
-    googleLocationSourceType: null,
+    googleLocationSourceType: GOOGLE_LOCATION_SOURCES.UNAVAILABLE,
     googleMatchType: "none",
+    googleMatchClassification: GOOGLE_MATCH_CLASSIFICATIONS.UNVERIFIED,
+    strictRankingEligible: false,
     googleLastVerifiedAt: null,
     googleVerificationEvidence: null,
     lastError: null,

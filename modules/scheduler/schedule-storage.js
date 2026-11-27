@@ -64,24 +64,27 @@ export function createScheduleStorage({
 
   async function claimExecution(executionId, ownerId) {
     if (!executionId) return { ok: false, error: "executionId is required." };
-    const exec = await getExecution(executionId);
-    if (!exec) return { ok: false, error: `Execution '${executionId}' not found.` };
-    if (exec.status !== EXECUTION_STATES.QUEUED) {
-      return {
-        ok: false,
-        alreadyClaimed: true,
-        error: `Execution '${executionId}' is in state '${exec.status}', not Queued.`,
+    const res = await db.atomicUpdate(STORES.SCHEDULE_EXECUTIONS, executionId, (exec) => {
+      if (!exec) {
+        return { ok: false, error: `Execution '${executionId}' not found.` };
+      }
+      if (exec.status !== EXECUTION_STATES.QUEUED) {
+        return {
+          ok: false,
+          alreadyClaimed: true,
+          error: `Execution '${executionId}' is in state '${exec.status}', not Queued.`,
+        };
+      }
+      const claimed = {
+        ...exec,
+        status: EXECUTION_STATES.RUNNING,
+        claimedBy: ownerId || executionId,
+        claimedAt: new Date().toISOString(),
       };
-    }
-    const claimed = {
-      ...exec,
-      status: EXECUTION_STATES.RUNNING,
-      claimedBy: ownerId || executionId,
-      claimedAt: new Date().toISOString(),
-    };
-    const saveRes = await saveExecution(claimed);
-    if (!saveRes.ok) return saveRes;
-    return { ok: true, execution: claimed };
+      return { ok: true, value: claimed, execution: claimed };
+    });
+    if (!res.ok) return res;
+    return { ok: true, execution: res.execution || res.value };
   }
 
   async function getExecution(executionId) {
@@ -163,29 +166,72 @@ export function createScheduleStorage({
   }
 
   async function acquireExecutionLock({ lockType, ownerId, description = "", ttlMs = 30 * 60000 } = {}) {
-    const current = await getExecutionLock();
+    if (!ownerId) {
+      return { acquired: false, error: "ownerId is required to acquire execution lock." };
+    }
     const nowMs = Date.now();
-    if (current && current.expiresAtMs && current.expiresAtMs > nowMs && current.ownerId !== ownerId) {
+    const res = await db.atomicUpdate(STORES.SETTINGS, SCHEDULER_LOCK_KEY, (rec) => {
+      const current = rec?.value || null;
+      if (current && current.expiresAtMs && current.expiresAtMs > nowMs && current.ownerId !== ownerId) {
+        return {
+          ok: false,
+          conflictLock: current,
+          error: `Active ${current.lockType} operation ('${current.ownerId}') is currently running.`,
+        };
+      }
+      const nextLock = {
+        lockType,
+        ownerId,
+        description,
+        acquiredAt: new Date(nowMs).toISOString(),
+        renewedAt: new Date(nowMs).toISOString(),
+        expiresAtMs: nowMs + ttlMs,
+      };
+      return {
+        ok: true,
+        lock: nextLock,
+        value: {
+          key: SCHEDULER_LOCK_KEY,
+          value: nextLock,
+          updatedAt: new Date(nowMs).toISOString(),
+        },
+      };
+    });
+
+    if (!res.ok) {
       return {
         acquired: false,
-        conflictLock: current,
-        error: `Active ${current.lockType} operation ('${current.ownerId}') is currently running.`,
+        conflictLock: res.conflictLock || null,
+        error: res.error || "Failed acquiring execution lock.",
       };
     }
+    return { acquired: true, lock: res.lock };
+  }
 
-    const nextLock = {
-      lockType,
-      ownerId,
-      description,
-      acquiredAt: new Date(nowMs).toISOString(),
-      expiresAtMs: nowMs + ttlMs,
-    };
-    await db.putOne(STORES.SETTINGS, {
-      key: SCHEDULER_LOCK_KEY,
-      value: nextLock,
-      updatedAt: new Date(nowMs).toISOString(),
+  async function renewExecutionLock(ownerId, ttlMs = 30 * 60000) {
+    if (!ownerId) return { ok: false, error: "ownerId is required." };
+    const nowMs = Date.now();
+    const res = await db.atomicUpdate(STORES.SETTINGS, SCHEDULER_LOCK_KEY, (rec) => {
+      const current = rec?.value || null;
+      if (!current || current.ownerId !== ownerId) {
+        return { ok: false, error: "Cannot renew lock: not owned by this operation." };
+      }
+      const renewed = {
+        ...current,
+        renewedAt: new Date(nowMs).toISOString(),
+        expiresAtMs: nowMs + ttlMs,
+      };
+      return {
+        ok: true,
+        lock: renewed,
+        value: {
+          key: SCHEDULER_LOCK_KEY,
+          value: renewed,
+          updatedAt: new Date(nowMs).toISOString(),
+        },
+      };
     });
-    return { acquired: true, lock: nextLock };
+    return res.ok ? { ok: true, lock: res.lock } : res;
   }
 
   async function releaseExecutionLock(ownerId = null) {
@@ -194,7 +240,8 @@ export function createScheduleStorage({
     if (ownerId && current.ownerId !== ownerId) {
       return { ok: false, released: false, error: "Lock owned by a different operation." };
     }
-    await db.deleteMany(STORES.SETTINGS, [SCHEDULER_LOCK_KEY]);
+    const delRes = await db.deleteMany(STORES.SETTINGS, [SCHEDULER_LOCK_KEY]);
+    if (!delRes.ok) return { ok: false, released: false, error: delRes.error };
     return { ok: true, released: true };
   }
 
@@ -213,6 +260,7 @@ export function createScheduleStorage({
     saveSchedulerSettings,
     getExecutionLock,
     acquireExecutionLock,
+    renewExecutionLock,
     releaseExecutionLock,
   };
 }

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Digital Minds Rank Tracker",
   "version": "1.0.0",
-  "version_name": "1.0.0-rc.1",
+  "version_name": "1.0.0-rc.2",
   "description": "Internal agency Chrome extension for location-accurate organic keyword ranking checks and design-preserving Google Sheets updates.",
   "permissions": [
     "storage",

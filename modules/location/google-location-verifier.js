@@ -2,11 +2,15 @@
  * Inspect Google Search's displayed footer location, source indicator, and CAPTCHA/block state.
  */
 
-import { getCountryPreset } from "./coordinate-validator.js";
-import { GOOGLE_LOCATION_STATUSES } from "./location-state.js";
+import { getCountryPreset, SUPPORTED_COUNTRIES } from "./coordinate-validator.js";
+import {
+  GOOGLE_LOCATION_SOURCES,
+  GOOGLE_LOCATION_STATUSES,
+  GOOGLE_MATCH_CLASSIFICATIONS,
+} from "./location-state.js";
 
 export const GOOGLE_LOCATION_LIMITATION_NOTE =
-  "A city-level match on Google's location footer indicates Google's displayed region only and does not prove exact GPS-level ranking accuracy.";
+  "A device-based city match on Google's location footer indicates Google's displayed region only and does not prove exact coordinate-level GPS ranking accuracy.";
 
 const BLOCK_INDICATORS = [
   "unusual traffic from your computer network",
@@ -60,17 +64,28 @@ export function detectGoogleBlock({ html = "", pageUrl = "" } = {}) {
 }
 
 function classifyLocationSource(rawText) {
-  const lower = rawText.toLowerCase();
-  if (lower.includes("from your device") || lower.includes("precise location")) {
-    return { label: "From your device", type: "device" };
+  const lower = String(rawText || "").toLowerCase();
+  if (
+    lower.includes("from your device") ||
+    lower.includes("based on your device") ||
+    lower.includes("precise location")
+  ) {
+    return { label: "From your device", type: GOOGLE_LOCATION_SOURCES.DEVICE };
   }
-  if (lower.includes("from your ip") || lower.includes("based on your ip") || lower.includes("internet address")) {
-    return { label: "From your IP address", type: "ip" };
+  if (
+    lower.includes("from your ip") ||
+    lower.includes("based on your ip") ||
+    lower.includes("internet address")
+  ) {
+    return { label: "From your IP address", type: GOOGLE_LOCATION_SOURCES.IP };
   }
-  if (lower.includes("from your places") || lower.includes("past activity")) {
-    return { label: "From your places / activity", type: "places" };
+  if (lower.includes("from your places") || lower.includes("saved places")) {
+    return { label: "From your places", type: GOOGLE_LOCATION_SOURCES.PLACES };
   }
-  return { label: "Not specified", type: "unknown" };
+  if (lower.includes("past activity") || lower.includes("previous activity") || lower.includes("your activity")) {
+    return { label: "From your previous activity", type: GOOGLE_LOCATION_SOURCES.ACTIVITY };
+  }
+  return { label: "Unknown location source", type: GOOGLE_LOCATION_SOURCES.UNKNOWN };
 }
 
 function extractFooterLocationAndSource(html) {
@@ -147,34 +162,161 @@ function segmentMatchesWordBoundary(text, target) {
   return pattern.test(text);
 }
 
+const KNOWN_COUNTRY_NAMES = Object.keys(SUPPORTED_COUNTRIES).concat([
+  "USA",
+  "UK",
+  "Great Britain",
+  "England",
+  "Germany",
+  "France",
+  "Spain",
+  "Italy",
+  "Japan",
+  "Singapore",
+  "Ireland",
+]);
+
+function detectConflictingCountry(rawDetected, targetCountry) {
+  const target = String(targetCountry || "").trim().toLowerCase();
+  if (!target || !rawDetected) return null;
+  for (const countryName of KNOWN_COUNTRY_NAMES) {
+    const cLower = countryName.toLowerCase();
+    if (cLower === target) continue;
+    if ((target === "united states" && cLower === "usa") || (target === "united kingdom" && (cLower === "uk" || cLower === "great britain" || cLower === "england"))) {
+      continue;
+    }
+    if (segmentMatchesWordBoundary(rawDetected, countryName)) {
+      return countryName;
+    }
+  }
+  return null;
+}
+
 export function locationMatchesTarget({
   detectedLocation,
   targetCity,
+  targetState = "",
   targetCountry,
-  locationSourceType = "unknown",
+  locationSourceType = GOOGLE_LOCATION_SOURCES.UNKNOWN,
 }) {
   const rawDetected = String(detectedLocation || "").trim();
   const city = String(targetCity || "").trim();
+  const state = String(targetState || "").trim();
   const country = String(targetCountry || "").trim();
   const segments = rawDetected.split(",").map((s) => s.trim()).filter(Boolean);
+
+  // Guard against identical city names in different countries (e.g. Sydney, Canada vs Sydney, Australia)
+  const conflictingCountry = detectConflictingCountry(rawDetected, country);
+  if (conflictingCountry) {
+    return {
+      matched: false,
+      strictEligible: false,
+      matchedBy: "none",
+      matchType: "mismatch",
+      classification: GOOGLE_MATCH_CLASSIFICATIONS.MISMATCH,
+      conflictReason: `Detected country '${conflictingCountry}' conflicts with target '${country}'.`,
+    };
+  }
 
   if (city) {
     const cityMatched = segments.some((seg) => segmentMatchesExactCity(seg, city));
     if (cityMatched) {
-      let matchType = "city_unknown_source";
-      if (locationSourceType === "device") matchType = "device_city";
-      else if (locationSourceType === "ip") matchType = "ip_city";
-      else if (locationSourceType === "places") matchType = "places_city";
-      return { matched: true, matchedBy: "city", matchType };
+      // If targetState is provided and detected text includes a different 2-3 letter state code, treat as ambiguous/mismatch
+      if (state) {
+        const hasTargetState = segmentMatchesWordBoundary(rawDetected, state);
+        const stateCodeMatch = new RegExp(`^${escapeRegExp(city)}\\s+([A-Z]{2,3})$`, "i").exec(segments[0] || "");
+        if (stateCodeMatch && state.length <= 3 && stateCodeMatch[1].toUpperCase() !== state.toUpperCase() && !hasTargetState) {
+          return {
+            matched: false,
+            strictEligible: false,
+            matchedBy: "none",
+            matchType: "mismatch",
+            classification: GOOGLE_MATCH_CLASSIFICATIONS.MISMATCH,
+            conflictReason: `Detected region '${stateCodeMatch[1]}' conflicts with target state '${state}'.`,
+          };
+        }
+      }
+
+      if (locationSourceType === GOOGLE_LOCATION_SOURCES.DEVICE) {
+        return {
+          matched: true,
+          strictEligible: true,
+          matchedBy: "city",
+          matchType: "device_city",
+          classification: GOOGLE_MATCH_CLASSIFICATIONS.DEVICE_CITY,
+        };
+      }
+      if (locationSourceType === GOOGLE_LOCATION_SOURCES.IP) {
+        return {
+          matched: false,
+          strictEligible: false,
+          matchedBy: "city_ip_only",
+          matchType: "ip_city",
+          classification: GOOGLE_MATCH_CLASSIFICATIONS.IP_CITY,
+        };
+      }
+      if (locationSourceType === GOOGLE_LOCATION_SOURCES.PLACES) {
+        return {
+          matched: false,
+          strictEligible: false,
+          matchedBy: "city_places_only",
+          matchType: "places_city",
+          classification: GOOGLE_MATCH_CLASSIFICATIONS.PLACES_CITY,
+        };
+      }
+      if (locationSourceType === GOOGLE_LOCATION_SOURCES.ACTIVITY) {
+        return {
+          matched: false,
+          strictEligible: false,
+          matchedBy: "city_activity_only",
+          matchType: "activity_city",
+          classification: GOOGLE_MATCH_CLASSIFICATIONS.ACTIVITY_CITY,
+        };
+      }
+      return {
+        matched: false,
+        strictEligible: false,
+        matchedBy: "city_unknown_source",
+        matchType: "ambiguous",
+        classification: GOOGLE_MATCH_CLASSIFICATIONS.AMBIGUOUS,
+      };
     }
-    return { matched: false, matchedBy: "none", matchType: "none" };
+    return {
+      matched: false,
+      strictEligible: false,
+      matchedBy: "none",
+      matchType: "mismatch",
+      classification: GOOGLE_MATCH_CLASSIFICATIONS.MISMATCH,
+    };
+  }
+
+  if (state && segmentMatchesWordBoundary(rawDetected, state) && locationSourceType === GOOGLE_LOCATION_SOURCES.DEVICE) {
+    return {
+      matched: true,
+      strictEligible: true,
+      matchedBy: "region",
+      matchType: "device_region",
+      classification: GOOGLE_MATCH_CLASSIFICATIONS.DEVICE_REGION,
+    };
   }
 
   if (country && segmentMatchesWordBoundary(rawDetected, country)) {
-    return { matched: true, matchedBy: "country", matchType: "country_only" };
+    return {
+      matched: false,
+      strictEligible: false,
+      matchedBy: "country",
+      matchType: "country_only",
+      classification: GOOGLE_MATCH_CLASSIFICATIONS.COUNTRY_ONLY,
+    };
   }
 
-  return { matched: false, matchedBy: "none", matchType: "none" };
+  return {
+    matched: false,
+    strictEligible: false,
+    matchedBy: "none",
+    matchType: "mismatch",
+    classification: GOOGLE_MATCH_CLASSIFICATIONS.MISMATCH,
+  };
 }
 
 /**
@@ -184,7 +326,10 @@ export function inspectGoogleSearchHtml({
   html,
   pageUrl = "",
   targetCity = "",
+  targetState = "",
   targetCountry = "",
+  configuredCoords = null,
+  browserGps = null,
 }) {
   const checkedAt = new Date().toISOString();
   const blockReason = detectGoogleBlock({ html, pageUrl });
@@ -194,9 +339,19 @@ export function inspectGoogleSearchHtml({
       status: GOOGLE_LOCATION_STATUSES.SEARCH_BLOCKED,
       detectedLocation: null,
       locationSource: null,
-      locationSourceType: null,
+      locationSourceType: GOOGLE_LOCATION_SOURCES.UNAVAILABLE,
       matchedBy: null,
       matchType: "none",
+      matchClassification: GOOGLE_MATCH_CLASSIFICATIONS.UNVERIFIED,
+      strictRankingEligible: false,
+      dimensions: {
+        configuredCoords,
+        browserGps,
+        googleDisplayedLocation: null,
+        googleLocationSource: GOOGLE_LOCATION_SOURCES.UNAVAILABLE,
+        geographicMatchGranularity: GOOGLE_MATCH_CLASSIFICATIONS.UNVERIFIED,
+        rankingEligibility: { eligible: false, reason: blockReason },
+      },
       checkedAt,
       pageUrl,
       error: blockReason,
@@ -210,9 +365,19 @@ export function inspectGoogleSearchHtml({
       status: GOOGLE_LOCATION_STATUSES.UNAVAILABLE,
       detectedLocation: null,
       locationSource: null,
-      locationSourceType: null,
+      locationSourceType: GOOGLE_LOCATION_SOURCES.UNAVAILABLE,
       matchedBy: null,
       matchType: "none",
+      matchClassification: GOOGLE_MATCH_CLASSIFICATIONS.UNVERIFIED,
+      strictRankingEligible: false,
+      dimensions: {
+        configuredCoords,
+        browserGps,
+        googleDisplayedLocation: null,
+        googleLocationSource: GOOGLE_LOCATION_SOURCES.UNAVAILABLE,
+        geographicMatchGranularity: GOOGLE_MATCH_CLASSIFICATIONS.UNVERIFIED,
+        rankingEligibility: { eligible: false, reason: "Google did not display a location footer on this page." },
+      },
       checkedAt,
       pageUrl,
       error: null,
@@ -223,31 +388,67 @@ export function inspectGoogleSearchHtml({
   const comparison = locationMatchesTarget({
     detectedLocation,
     targetCity,
+    targetState,
     targetCountry,
     locationSourceType,
   });
 
+  let status = GOOGLE_LOCATION_STATUSES.MISMATCH;
   let warning = null;
-  if (locationSourceType === "ip") {
-    warning = "Google reported location from IP address rather than browser GPS device location.";
-  } else if (comparison.matchType === "country_only") {
-    warning = "Country-only match (no target city verified). Does not prove city-level or GPS accuracy.";
-  } else if (comparison.matched) {
+  let error = null;
+
+  if (comparison.strictEligible) {
+    status = GOOGLE_LOCATION_STATUSES.MATCHED;
     warning = GOOGLE_LOCATION_LIMITATION_NOTE;
+  } else if (comparison.matchType === "ip_city") {
+    status = GOOGLE_LOCATION_STATUSES.NON_DEVICE_MATCH;
+    warning = "Google reported location from IP address rather than browser GPS device location. Not eligible for strict live ranking verification.";
+    error = `Google location '${detectedLocation}' is IP-based (${locationSource}), not device-based GPS.`;
+  } else if (comparison.matchType === "places_city" || comparison.matchType === "activity_city") {
+    status = GOOGLE_LOCATION_STATUSES.NON_DEVICE_MATCH;
+    warning = `Google reported location from ${locationSource} rather than device GPS. Not eligible for strict live ranking verification.`;
+    error = `Google location '${detectedLocation}' came from ${locationSource}, not device-based GPS.`;
+  } else if (comparison.matchType === "country_only") {
+    status = GOOGLE_LOCATION_STATUSES.AMBIGUOUS;
+    warning = "Country-only match (no target city verified). Does not prove city-level or GPS accuracy.";
+    error = `Google displayed country-level '${detectedLocation}', which does not verify target city '${targetCity || targetCountry}'.`;
+  } else if (comparison.matchType === "ambiguous") {
+    status = GOOGLE_LOCATION_STATUSES.AMBIGUOUS;
+    warning = "Google location source could not be confirmed as device-based.";
+    error = `Google location '${detectedLocation}' has an unconfirmed source (${locationSource}).`;
+  } else {
+    status = GOOGLE_LOCATION_STATUSES.MISMATCH;
+    error =
+      comparison.conflictReason ||
+      `Google displayed '${detectedLocation}', which does not match target '${targetCity || targetCountry}'.`;
+    if (locationSourceType === GOOGLE_LOCATION_SOURCES.IP) {
+      warning = "Google reported location from IP address rather than browser GPS device location.";
+    }
   }
 
   return {
-    status: comparison.matched ? GOOGLE_LOCATION_STATUSES.MATCHED : GOOGLE_LOCATION_STATUSES.MISMATCH,
+    status,
     detectedLocation,
     locationSource,
     locationSourceType,
     matchedBy: comparison.matchedBy,
     matchType: comparison.matchType,
+    matchClassification: comparison.classification,
+    strictRankingEligible: Boolean(comparison.strictEligible),
+    dimensions: {
+      configuredCoords,
+      browserGps,
+      googleDisplayedLocation: detectedLocation,
+      googleLocationSource: locationSourceType,
+      geographicMatchGranularity: comparison.classification,
+      rankingEligibility: {
+        eligible: Boolean(comparison.strictEligible),
+        reason: comparison.strictEligible ? "Device-based Google location matched target." : error || warning,
+      },
+    },
     checkedAt,
     pageUrl,
-    error: comparison.matched
-      ? null
-      : `Google displayed '${detectedLocation}', which does not match target '${targetCity || targetCountry}'.`,
+    error,
     warning,
   };
 }

@@ -80,9 +80,13 @@ export function validateLocationInput({
   longitude,
   accuracy = DEFAULT_ACCURACY_METRES,
   targetCity = "",
+  targetState = "",
   country = "Australia",
   language = "",
   googleDomain = "",
+  deviceType = "Desktop",
+  searchDepth = 50,
+  reportingTimezone = "",
   testPageUrl = "",
 } = {}) {
   const errors = [];
@@ -124,21 +128,33 @@ export function validateLocationInput({
 
   const cleanLanguage = String(language || preset.defaultLanguage).trim() || preset.defaultLanguage;
 
+  const warnings = [];
+  if (SUPPORTED_COUNTRIES[cleanCountry] && cleanDomain !== preset.googleDomain) {
+    warnings.push(
+      `Country '${cleanCountry}' normally uses '${preset.googleDomain}', but '${cleanDomain}' is selected.`
+    );
+  }
+
   if (errors.length > 0) {
-    return { valid: false, errors };
+    return { valid: false, errors, warnings };
   }
 
   return {
     valid: true,
+    warnings,
     value: {
       locationName: String(locationName || "").trim(),
       latitude: parsedLat,
       longitude: parsedLng,
       accuracy: parsedAccuracy,
       targetCity: String(targetCity || "").trim(),
+      targetState: String(targetState || "").trim(),
       country: cleanCountry,
       language: cleanLanguage,
       googleDomain: cleanDomain,
+      deviceType: String(deviceType || "Desktop").trim() || "Desktop",
+      searchDepth: Number(searchDepth) || 50,
+      reportingTimezone: String(reportingTimezone || "").trim(),
       testPageUrl: cleanUrl,
     },
   };

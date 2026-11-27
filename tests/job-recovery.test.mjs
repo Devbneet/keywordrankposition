@@ -171,6 +171,7 @@ test("prevents duplicate simultaneous jobs and requires fresh location verificat
     websiteDomain: "example.com",
     keywords: ["kw 1", "kw 2"],
     searchDepth: 10,
+    isAuthorized: true,
   });
 
   await new Promise((r) => setTimeout(r, 20));
@@ -179,6 +180,7 @@ test("prevents duplicate simultaneous jobs and requires fresh location verificat
     websiteDomain: "example.com",
     keywords: ["kw 3"],
     searchDepth: 10,
+    isAuthorized: true,
   });
   assert.equal(dupRes.ok, false);
   assert.match(dupRes.error, /already running/i);

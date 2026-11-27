@@ -30,11 +30,28 @@ export function createSheetsWriteClient({
     dryRun = true,
     sandboxAllowlist = sandboxSpreadsheetIds,
   } = {}) {
+    const allowedModes = new Set(Object.values(UPDATE_MODES));
+    if (!allowedModes.has(mode)) {
+      return {
+        ok: false,
+        code: "INVALID_EXECUTION_MODE",
+        error: `Unsupported Google Sheets execution mode '${String(mode)}'.`,
+      };
+    }
+
     if (dryRun || mode === UPDATE_MODES.DRY_RUN) {
       return {
         ok: false,
         dryRunBlocked: true,
         error: "Dry-run mode is active. Switch off dry-run and confirm the preview before writing.",
+      };
+    }
+
+    if (mode === UPDATE_MODES.MOCK) {
+      return {
+        ok: true,
+        mocked: true,
+        data: { spreadsheetId, replies: [] },
       };
     }
 

@@ -234,8 +234,10 @@ export function createScheduledJobRunner({
 
     let haltedByCaptcha = false;
     let haltedByLocation = false;
+    let haltedByStorage = false;
     let haltError = null;
 
+    try {
     for (let i = 0; i < jobRecord.tasks.length; i += 1) {
       const task = jobRecord.tasks[i];
       if (task.status === TASK_STATUSES.RANKED || task.status === TASK_STATUSES.NOT_FOUND) {
@@ -305,46 +307,69 @@ export function createScheduledJobRunner({
       };
       const saveSingleRes = await clientStorage.saveResultsBatch([singleResultRecord]);
       if (!saveSingleRes?.ok) {
+        haltedByStorage = true;
         haltError = saveSingleRes?.error || "Storage write failed while persisting keyword result.";
         break;
       }
       if (historyStorage) {
         const histRes = await historyStorage.saveRankingHistoryBatch([singleResultRecord]);
         if (!histRes?.ok) {
+          haltedByStorage = true;
           haltError = histRes?.error || "History storage write failed.";
           break;
         }
       }
-      await clientStorage.saveJobRecord(jobRecord);
+      const jobSaveRes = await clientStorage.saveJobRecord(jobRecord);
+      if (jobSaveRes && jobSaveRes.ok === false) {
+        haltedByStorage = true;
+        haltError = jobSaveRes.error || "Job checkpoint storage write failed.";
+        break;
+      }
 
       if (haltedByCaptcha || haltedByLocation) {
         await clientStorage.saveJobRecord({ ...jobRecord, state: JOB_STATES.PAUSED });
         break;
       }
     }
+    } catch (unexpectedErr) {
+      haltedByStorage = true;
+      haltError = unexpectedErr instanceof Error ? unexpectedErr.message : String(unexpectedErr);
+    }
 
     const errorCount = jobRecord.tasks.filter((t) => isFailedTaskStatus(t.status)).length;
-    jobRecord.state = haltedByCaptcha || haltedByLocation
-      ? JOB_STATES.PAUSED
-      : errorCount > 0
-        ? JOB_STATES.COMPLETED_WITH_ERRORS
-        : JOB_STATES.COMPLETED;
-    jobRecord.completedAt = new Date().toISOString();
-    await clientStorage.saveJobRecord(jobRecord);
+    const unfinishedCount = jobRecord.tasks.filter((t) => t.status === TASK_STATUSES.PENDING).length;
+    jobRecord.state = haltedByStorage
+      ? JOB_STATES.INTERRUPTED
+      : haltedByCaptcha || haltedByLocation
+        ? JOB_STATES.PAUSED
+        : errorCount > 0 || unfinishedCount > 0
+          ? JOB_STATES.COMPLETED_WITH_ERRORS
+          : JOB_STATES.COMPLETED;
+    jobRecord.storageFailure = haltedByStorage;
+    jobRecord.lastError = haltError || null;
+    jobRecord.completedAt = haltedByStorage ? null : new Date().toISOString();
+    const finalJobSave = await clientStorage.saveJobRecord(jobRecord);
+    if (finalJobSave && finalJobSave.ok === false) {
+      haltedByStorage = true;
+      haltError = finalJobSave.error || "Failed saving final job state.";
+      jobRecord.state = JOB_STATES.INTERRUPTED;
+    }
 
     // Persist verified & failed task logs cleanly into client results & unified history storage
-    const resultRecords = jobRecord.tasks
-      .filter((t) => t.status !== TASK_STATUSES.PENDING)
-      .map((t) => ({
-        ...t,
-        recordKey: `${jobRecord.jobId}::${t.taskId}`,
-        timestamp: t.checkedAt || jobRecord.completedAt,
-        sourceMode: "live_bulk",
-      }));
-    if (resultRecords.length > 0) {
-      await clientStorage.saveResultsBatch(resultRecords);
-      if (historyStorage) {
-        await historyStorage.saveRankingHistoryBatch(resultRecords);
+    if (!haltedByStorage) {
+      const resultRecords = jobRecord.tasks
+        .filter((t) => t.status !== TASK_STATUSES.PENDING)
+        .map((t) => ({
+          ...t,
+          recordKey: `${jobRecord.jobId}::${t.taskId}`,
+          timestamp: t.checkedAt || jobRecord.completedAt,
+          sourceMode: "live_bulk",
+        }));
+      if (resultRecords.length > 0) {
+        await clientStorage.saveResultsBatch(resultRecords);
+        if (historyStorage) {
+          await historyStorage.saveRankingHistoryBatch(resultRecords);
+        }
       }
     }
 
@@ -356,7 +381,7 @@ export function createScheduledJobRunner({
       (t) => t.status === TASK_STATUSES.RANKED || t.status === TASK_STATUSES.NOT_FOUND
     ).length;
 
-    if (!haltedByCaptcha && !haltedByLocation && completedCleanCount > 0 && sheetUrlOrId && sheetUpdater) {
+    if (!haltedByStorage && !haltedByCaptcha && !haltedByLocation && completedCleanCount > 0 && sheetUrlOrId && sheetUpdater) {
       const reportingDate = now.toISOString().slice(0, 10);
       const prevRes = await sheetUpdater.generatePreview({
         clientId: client.clientId,
@@ -407,7 +432,8 @@ export function createScheduledJobRunner({
     }
 
     return {
-      ok: !haltedByCaptcha && !haltedByLocation && errorCount === 0,
+      ok: !haltedByStorage && !haltedByCaptcha && !haltedByLocation && errorCount === 0,
+      storageFailure: haltedByStorage,
       clientId: client.clientId,
       clientName: client.clientName,
       locationName: location.locationName,
@@ -500,11 +526,12 @@ export function createScheduledJobRunner({
           r.failureCode === SCHEDULE_FAILURE_CODES.GOOGLE_LOCATION_FAILED
       );
       const anyAuthFail = clientReports.some((r) => r.failureCode === SCHEDULE_FAILURE_CODES.AUTH_EXPIRED);
-      const allFailed = clientReports.length > 0 && clientReports.every((r) => !r.ok && r.completedKeywords === 0);
+      const anyStorageFail = clientReports.some((r) => r.storageFailure);
+      const allFailed = clientReports.length > 0 && clientReports.every((r) => !r.ok && (r.completedKeywords === 0 || r.storageFailure));
       const hasAnyError = clientReports.some((r) => !r.ok || r.failedKeywords > 0 || Boolean(r.error));
 
-      const finalExecStatus = allFailed || anyCaptcha || anyLocationFail || anyAuthFail
-        ? anyCaptcha || allFailed
+      const finalExecStatus = anyStorageFail || allFailed || anyCaptcha || anyLocationFail || anyAuthFail
+        ? anyStorageFail || anyCaptcha || allFailed
           ? EXECUTION_STATES.FAILED
           : EXECUTION_STATES.COMPLETED_WITH_ERRORS
         : summary.previewReadyCount > 0
@@ -535,7 +562,7 @@ export function createScheduledJobRunner({
 
       const nextSchedStatus = !schedule.enabled
         ? SCHEDULE_STATES.DISABLED
-        : anyCaptcha || anyLocationFail || anyAuthFail || allFailed
+        : anyStorageFail || anyCaptcha || anyLocationFail || anyAuthFail || allFailed
           ? SCHEDULE_STATES.NEEDS_ATTENTION
           : SCHEDULE_STATES.ENABLED;
 
@@ -598,7 +625,7 @@ export function createScheduledJobRunner({
         }).catch(() => {});
       }
 
-      return { ok: true, execution, schedule: updatedSchedule };
+      return { ok: !anyStorageFail, storageFailure: anyStorageFail, execution, schedule: updatedSchedule };
     } finally {
       await scheduleStorage.releaseExecutionLock(execution.executionId);
     }

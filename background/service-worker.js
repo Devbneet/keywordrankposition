@@ -13,7 +13,7 @@ import { computeAgencyOverviewMetrics, computeClientDashboardMetrics } from "../
 import { createActivityLogger, LOG_CATEGORIES } from "../modules/logging/activity-logger.js";
 import { createNotificationManager } from "../modules/notifications/notification-manager.js";
 import { generateAgencyCsvReport } from "../modules/reports/report-generator.js";
-import { RANKING_STATUSES } from "../modules/ranking/ranking-state.js";
+import { isCanonicalLiveVerified, RANKING_STATUSES } from "../modules/ranking/ranking-state.js";
 import { createSingleKeywordChecker } from "../modules/ranking/single-keyword-checker.js";
 import { createAlarmController, QUEUE_DRAIN_ALARM_NAME, scheduleIdFromAlarmName } from "../modules/scheduler/alarm-controller.js";
 import { createExecutionQueue } from "../modules/scheduler/execution-queue.js";
@@ -182,6 +182,7 @@ function getOrCreateServices(chromeApi) {
           websiteDomain: client.websiteDomain,
           searchDepth: job.searchDepth || 50,
           deviceType: location.deviceType || job.deviceType || "Desktop",
+          isAuthorized: Boolean(schedule?.isAuthorized ?? job?.isAuthorized ?? true),
           _caller: "bulk",
         });
         const r = res?.result || {};
@@ -189,21 +190,29 @@ function getOrCreateServices(chromeApi) {
         let mappedStatus = TASK_STATUSES.NETWORK_ERROR;
         if (rawSt === RANKING_STATUSES.RANKED) mappedStatus = TASK_STATUSES.RANKED;
         else if (rawSt === RANKING_STATUSES.NOT_FOUND) mappedStatus = TASK_STATUSES.NOT_FOUND;
-        else if (rawSt === RANKING_STATUSES.SEARCH_BLOCKED) mappedStatus = TASK_STATUSES.SEARCH_BLOCKED;
-        else if (rawSt === RANKING_STATUSES.PARSING_ERROR) mappedStatus = TASK_STATUSES.PARSING_ERROR;
+        else if (rawSt === RANKING_STATUSES.SEARCH_BLOCKED || rawSt === RANKING_STATUSES.CAPTCHA_DETECTED) {
+          mappedStatus = TASK_STATUSES.SEARCH_BLOCKED;
+        } else if (rawSt === RANKING_STATUSES.PARSING_ERROR) mappedStatus = TASK_STATUSES.PARSING_ERROR;
+        else if (rawSt === RANKING_STATUSES.PERMISSION_DENIED) mappedStatus = TASK_STATUSES.PERMISSION_DENIED;
         else if (rawSt === RANKING_STATUSES.LOCATION_MISMATCH || rawSt === RANKING_STATUSES.LOCATION_UNVERIFIED) {
           mappedStatus = TASK_STATUSES.LOCATION_MISMATCH;
         }
+        const verifiedDepth = Number(
+          r.actualVerifiedDepth ?? r.checkedResults ?? r.checkedResultsCount ?? r.actualResultsChecked ?? 0
+        );
         return {
           status: mappedStatus,
           position: typeof r.position === "number" ? r.position : null,
           rankingUrl: r.rankingUrl || null,
-          actualResultsChecked: Number(r.checkedResultsCount ?? r.actualResultsChecked ?? 0),
+          actualResultsChecked: verifiedDepth,
+          checkedResults: verifiedDepth,
+          verifiedEndOfResults: Boolean(r.verifiedEndOfResults),
           browserGpsVerification: r.browserGpsStatus || null,
           googleLocationVerification: r.googleLocationStatus || null,
-          isLiveVerified:
-            (mappedStatus === TASK_STATUSES.RANKED || mappedStatus === TASK_STATUSES.NOT_FOUND) &&
-            r.isLiveVerified !== false,
+          googleLocationSource: r.googleLocationSource || null,
+          googleLocationSourceType: r.googleLocationSourceType || null,
+          sourceMode: r.sourceMode || "live_google",
+          isLiveVerified: isCanonicalLiveVerified(r),
           captchaDetected: mappedStatus === TASK_STATUSES.SEARCH_BLOCKED,
           locationMismatch: mappedStatus === TASK_STATUSES.LOCATION_MISMATCH,
           transient: mappedStatus === TASK_STATUSES.NETWORK_ERROR,

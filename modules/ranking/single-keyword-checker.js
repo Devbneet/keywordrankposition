@@ -8,6 +8,7 @@ import { getCountryPreset } from "../location/coordinate-validator.js";
 import { verifyBrowserGeolocation } from "../location/geolocation-verifier.js";
 import { inspectGoogleSearchHtml } from "../location/google-location-verifier.js";
 import {
+  computeLocationConfigFingerprint,
   GOOGLE_LOCATION_STATUSES,
   hasConfigChanged,
   LOCATION_STATES,
@@ -17,6 +18,7 @@ import { parseGoogleSerpHtml } from "./organic-parser.js";
 import { calculateOrganicRanking } from "./ranking-calculator.js";
 import {
   clearRankingState,
+  createCanonicalRankingResult,
   loadRankingState,
   RANKING_STATUSES,
   saveRankingState,
@@ -73,25 +75,25 @@ function buildResultRecord({
     !isManual &&
     (status === RANKING_STATUSES.RANKED || status === RANKING_STATUSES.NOT_FOUND) &&
     locationState?.browserGpsStatus === LOCATION_STATES.GPS_VERIFIED &&
-    locationState?.googleLocationStatus === GOOGLE_LOCATION_STATUSES.MATCHED;
+    locationState?.googleLocationStatus === GOOGLE_LOCATION_STATUSES.MATCHED &&
+    locationState?.googleLocationSourceType === "device" &&
+    locationState?.strictRankingEligible !== false;
 
-  return {
+  const canonical = createCanonicalRankingResult({
     keyword: String(keyword || "").trim(),
-    targetWebsite: String(targetWebsite || "").trim(),
+    targetDomain: String(targetWebsite || "").trim(),
     position,
     rankingUrl,
-    checkedResults,
+    actualVerifiedDepth: checkedResults,
     requestedDepth,
     verifiedEndOfResults,
     sourceMode,
     isLiveVerified: isVerifiedOutcome,
-    sourceLabel: isManual
-      ? "Manual SERP HTML (Not Live Verified)"
-      : isVerifiedOutcome
-        ? "Live Google Search (Verified)"
-        : "Live Google Search (Unverified / Incomplete)",
     deviceType,
-    configSnapshot: locationState?.config ? { ...locationState.config } : null,
+    country: locationState?.config?.country || null,
+    language: locationState?.config?.language || null,
+    googleDomain: locationState?.config?.googleDomain || null,
+    locationFingerprint: computeLocationConfigFingerprint(locationState?.config),
     browserGpsStatus: isManual
       ? "Not used (Manual SERP HTML)"
       : locationState?.browserGpsStatus || LOCATION_STATES.NOT_CONFIGURED,
@@ -102,11 +104,21 @@ function buildResultRecord({
     googleLocationSourceType: isManual ? "manual" : locationState?.googleLocationSourceType || null,
     googleMatchType: isManual ? "none" : locationState?.googleMatchType || "none",
     googleDetectedLocation: isManual ? null : locationState?.googleDetectedLocation || null,
-    checkedAt: new Date().toISOString(),
-    durationMs: Math.max(0, Date.now() - startedAtMs),
     status,
     errorDetails,
-    invalidatedByLocationChange: false,
+  });
+
+  return {
+    ...canonical,
+    targetWebsite: canonical.targetDomain,
+    sourceLabel: isManual
+      ? "Manual SERP HTML (Not Live Verified)"
+      : isVerifiedOutcome
+        ? "Live Google Search (Verified)"
+        : "Live Google Search (Unverified / Incomplete)",
+    configSnapshot: locationState?.config ? { ...locationState.config } : null,
+    googleMatchClassification: isManual ? "Manual HTML" : locationState?.googleMatchClassification || null,
+    durationMs: Math.max(0, Date.now() - startedAtMs),
     resultsTable,
   };
 }
@@ -197,7 +209,7 @@ export function createSingleKeywordChecker({
     useManualHtml = false,
     deviceType = "Desktop",
     maxLocationAgeMs = DEFAULT_MAX_LOCATION_AGE_MS,
-    isAuthorized = true,
+    isAuthorized = false,
     _caller = "single",
   } = {}) {
     const startedAtMs = Date.now();
@@ -311,11 +323,25 @@ export function createSingleKeywordChecker({
         return { ok: result.status === RANKING_STATUSES.RANKED, result, state: saved };
       }
 
-      // Mode 2: Live authorized Google Search tab — enforce lock + fresh location verification gate!
-      if (!isAuthorized) {
+      // Mode 2: Live authorized Google Search tab — enforce explicit authorization, lock, and fresh location verification gate!
+      if (isAuthorized !== true) {
+        const unauthResult = buildResultRecord({
+          keyword: cleanKeyword,
+          targetWebsite: cleanDomain,
+          requestedDepth: depth,
+          locationState: currentLocation,
+          status: RANKING_STATUSES.AUTHENTICATION_REQUIRED,
+          errorDetails: "Authorized search access is required before running a live ranking check.",
+          sourceMode: "live_google",
+          deviceType,
+          startedAtMs,
+        });
+        const saved = await persistFinalResult(unauthResult);
         return {
           ok: false,
-          error: "Authorized search access is required before running a live ranking check.",
+          error: unauthResult.errorDetails,
+          result: unauthResult,
+          state: saved,
         };
       }
       let acquiredSingleLock = false;
@@ -359,7 +385,10 @@ export function createSingleKeywordChecker({
         gateError = liveLocation.lastError || "Google-detected location does not match target location.";
       } else if (liveLocation.googleLocationStatus !== GOOGLE_LOCATION_STATUSES.MATCHED) {
         gateStatus = RANKING_STATUSES.LOCATION_UNVERIFIED;
-        gateError = "Google search location is not verified. Click Verify Google Location first.";
+        gateError = liveLocation.lastError || "Google search location is not verified. Click Verify Google Location first.";
+      } else if (liveLocation.googleLocationSourceType !== "device" || liveLocation.strictRankingEligible === false) {
+        gateStatus = RANKING_STATUSES.LOCATION_UNVERIFIED;
+        gateError = liveLocation.lastError || "Google location must be a device-based city match for strict live ranking verification.";
       } else if (isLocationVerificationStale(liveLocation, maxLocationAgeMs)) {
         gateStatus = RANKING_STATUSES.LOCATION_UNVERIFIED;
         gateError = "Location verification is stale. Re-verify Google location before checking rankings.";
@@ -570,46 +599,68 @@ export function createSingleKeywordChecker({
           break;
         }
 
-        // Re-verify Google's displayed location on this SERP page if footer location is present
+        // Re-verify Google's displayed location on every SERP page; never reuse stale verification if missing/incompatible
         const googleFooterCheck = inspectGoogleSearchHtml({
           html: pageHtml,
           pageUrl: pageHref,
           targetCity: initialConfig.targetCity || initialConfig.locationName,
+          targetState: initialConfig.targetState || "",
           targetCountry: initialConfig.country,
         });
-        if (googleFooterCheck.status === GOOGLE_LOCATION_STATUSES.MISMATCH) {
-          const mismatchResult = buildResultRecord({
-            keyword: cleanKeyword,
-            targetWebsite: cleanDomain,
-            requestedDepth: depth,
-            locationState: {
-              ...liveLocation,
-              googleLocationStatus: googleFooterCheck.status,
-              googleDetectedLocation: googleFooterCheck.detectedLocation,
-              googleLocationSource: googleFooterCheck.locationSource,
-              googleLocationSourceType: googleFooterCheck.locationSourceType,
-              googleMatchType: googleFooterCheck.matchType,
-            },
-            status: RANKING_STATUSES.LOCATION_MISMATCH,
-            checkedResults: collectedCount,
-            errorDetails: googleFooterCheck.error,
-            sourceMode: "live_google",
-            deviceType,
-            startedAtMs,
-          });
-          const saved = await persistFinalResult(mismatchResult);
-          return { ok: false, result: mismatchResult, state: saved };
-        }
-        if (googleFooterCheck.status === GOOGLE_LOCATION_STATUSES.MATCHED) {
-          liveLocation = {
+        if (googleFooterCheck.status !== GOOGLE_LOCATION_STATUSES.MATCHED || !googleFooterCheck.strictRankingEligible) {
+          const isMismatch = googleFooterCheck.status === GOOGLE_LOCATION_STATUSES.MISMATCH;
+          const isBlocked = googleFooterCheck.status === GOOGLE_LOCATION_STATUSES.SEARCH_BLOCKED;
+          const failStatus = isBlocked
+            ? RANKING_STATUSES.SEARCH_BLOCKED
+            : isMismatch
+              ? RANKING_STATUSES.LOCATION_MISMATCH
+              : RANKING_STATUSES.LOCATION_UNVERIFIED;
+          const updatedLocState = {
             ...liveLocation,
             googleLocationStatus: googleFooterCheck.status,
             googleDetectedLocation: googleFooterCheck.detectedLocation,
             googleLocationSource: googleFooterCheck.locationSource,
             googleLocationSourceType: googleFooterCheck.locationSourceType,
             googleMatchType: googleFooterCheck.matchType,
+            googleMatchClassification: googleFooterCheck.matchClassification,
+            strictRankingEligible: false,
           };
+          if (locationController?.recordLiveCheckVerification) {
+            await locationController.recordLiveCheckVerification({
+              tabId,
+              pageUrl: pageHref,
+              gpsCheck: midGpsCheck,
+              googleFooterCheck,
+            });
+          }
+          const locFailResult = buildResultRecord({
+            keyword: cleanKeyword,
+            targetWebsite: cleanDomain,
+            requestedDepth: depth,
+            locationState: updatedLocState,
+            status: failStatus,
+            checkedResults: collectedCount,
+            errorDetails:
+              googleFooterCheck.error ||
+              googleFooterCheck.warning ||
+              "Google location evidence unavailable or incompatible on SERP page.",
+            sourceMode: "live_google",
+            deviceType,
+            startedAtMs,
+          });
+          const saved = await persistFinalResult(locFailResult);
+          return { ok: false, result: locFailResult, state: saved };
         }
+        liveLocation = {
+          ...liveLocation,
+          googleLocationStatus: googleFooterCheck.status,
+          googleDetectedLocation: googleFooterCheck.detectedLocation,
+          googleLocationSource: googleFooterCheck.locationSource,
+          googleLocationSourceType: googleFooterCheck.locationSourceType,
+          googleMatchType: googleFooterCheck.matchType,
+          googleMatchClassification: googleFooterCheck.matchClassification,
+          strictRankingEligible: true,
+        };
         if (locationController?.recordLiveCheckVerification) {
           await locationController.recordLiveCheckVerification({
             tabId,

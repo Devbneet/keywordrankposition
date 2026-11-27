@@ -247,6 +247,7 @@ test("processes 10, 50, and 100 keyword queues sequentially and persists without
           websiteDomain: "pos5.example.net",
           keywords,
           searchDepth: 10,
+          isAuthorized: true,
         },
       },
       null,
@@ -291,7 +292,7 @@ test("supports Pause and Resume without repeating completed keywords and Stop pr
   const pausedRes = await handleRuntimeMessage(
     {
       type: MESSAGE_TYPES.BULK_START,
-      payload: { websiteDomain: "pos1.example.com", keywords, searchDepth: 10 },
+      payload: { websiteDomain: "pos1.example.com", keywords, searchDepth: 10, isAuthorized: true },
     },
     null,
     mockChrome
@@ -320,7 +321,7 @@ test("supports Pause and Resume without repeating completed keywords and Stop pr
   const stoppedRes = await handleRuntimeMessage(
     {
       type: MESSAGE_TYPES.BULK_START,
-      payload: { websiteDomain: "pos1.example.com", keywords, searchDepth: 10 },
+      payload: { websiteDomain: "pos1.example.com", keywords, searchDepth: 10, isAuthorized: true },
     },
     null,
     stopChrome
@@ -346,6 +347,7 @@ test("stops immediately on CAPTCHA, tab closure, debugger disconnect, and locati
         websiteDomain: "pos1.example.com",
         keywords: ["kw 1", "kw blocked", "kw remaining"],
         searchDepth: 10,
+        isAuthorized: true,
       },
     },
     null,
@@ -364,7 +366,7 @@ test("stops immediately on CAPTCHA, tab closure, debugger disconnect, and locati
   const closedRes = await handleRuntimeMessage(
     {
       type: MESSAGE_TYPES.BULK_START,
-      payload: { websiteDomain: "pos1.example.com", keywords: ["kw 1", "kw 2", "kw 3"], searchDepth: 10 },
+      payload: { websiteDomain: "pos1.example.com", keywords: ["kw 1", "kw 2", "kw 3"], searchDepth: 10, isAuthorized: true },
     },
     null,
     closedTabChrome
@@ -380,7 +382,7 @@ test("stops immediately on CAPTCHA, tab closure, debugger disconnect, and locati
   const detachRes = await handleRuntimeMessage(
     {
       type: MESSAGE_TYPES.BULK_START,
-      payload: { websiteDomain: "pos1.example.com", keywords: ["kw 1", "kw 2"], searchDepth: 10 },
+      payload: { websiteDomain: "pos1.example.com", keywords: ["kw 1", "kw 2"], searchDepth: 10, isAuthorized: true },
     },
     null,
     detachChrome
@@ -398,7 +400,7 @@ test("stops immediately on CAPTCHA, tab closure, debugger disconnect, and locati
   const mismatchRes = await handleRuntimeMessage(
     {
       type: MESSAGE_TYPES.BULK_START,
-      payload: { websiteDomain: "pos1.example.com", keywords: ["kw 1", "kw 2"], searchDepth: 10 },
+      payload: { websiteDomain: "pos1.example.com", keywords: ["kw 1", "kw 2"], searchDepth: 10, isAuthorized: true },
     },
     null,
     mismatchChrome
@@ -465,7 +467,7 @@ test("filters bulk results, sanitizes CSV formula injection, and handles storage
   const quotaRes = await handleRuntimeMessage(
     {
       type: MESSAGE_TYPES.BULK_START,
-      payload: { websiteDomain: "pos1.example.com", keywords: ["kw 1", "kw 2"], searchDepth: 10 },
+      payload: { websiteDomain: "pos1.example.com", keywords: ["kw 1", "kw 2"], searchDepth: 10, isAuthorized: true },
     },
     null,
     quotaChrome

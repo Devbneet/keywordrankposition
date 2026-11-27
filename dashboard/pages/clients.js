@@ -14,6 +14,7 @@ export function createClientsPage({
   getLocationDefaults,
   getRankingDefaults,
   onClientSelected,
+  onOverviewsUpdated,
   onStartCheckFlow,
   onNavigate,
   onViewClientHistory,
@@ -356,6 +357,9 @@ export function createClientsPage({
         await refreshWorkspace(res.active.clientId, res.active.locationId);
       }
       renderCards(res.overviews || []);
+      if (onOverviewsUpdated) {
+        onOverviewsUpdated(res.overviews || [], activeWorkspace?.client?.clientId || res.active?.clientId || null);
+      }
       return res;
     }
     return null;

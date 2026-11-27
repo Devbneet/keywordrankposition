@@ -66,16 +66,22 @@ export function buildRestoreBatchUpdateRequests(backupRecord) {
     for (let c = 0; c < colCount; c += 1) {
       const fVal = formRow[c];
       const dVal = dispRow[c];
-      const cellFormat = gridCellRow[c]?.userEnteredFormat || gridCellRow[c]?.effectiveFormat || undefined;
+      const rawCell = gridCellRow[c];
+      const cellFormat = rawCell?.userEnteredFormat || rawCell?.effectiveFormat || undefined;
       let userEnteredValue;
-      if (typeof fVal === "string" && fVal.startsWith("=")) {
+      if (rawCell && rawCell.userEnteredValue !== undefined) {
+        // Preserve exact original cell type (leading-zero strings, numbers, booleans, formulas, or blank)
+        userEnteredValue = structuredClone(rawCell.userEnteredValue);
+      } else if (typeof fVal === "string" && fVal.startsWith("=")) {
         userEnteredValue = { formulaValue: fVal };
-      } else if (typeof dVal === "number") {
+      } else if (typeof dVal === "number" && Number.isFinite(dVal)) {
         userEnteredValue = { numberValue: dVal };
-      } else if (typeof dVal === "string" && dVal !== "" && /^-?\d+(\.\d+)?$/.test(dVal)) {
-        userEnteredValue = { numberValue: Number(dVal) };
+      } else if (typeof dVal === "boolean") {
+        userEnteredValue = { boolValue: dVal };
+      } else if (dVal === "" || dVal === null || dVal === undefined) {
+        userEnteredValue = {};
       } else {
-        userEnteredValue = { stringValue: String(dVal ?? "") };
+        userEnteredValue = { stringValue: String(dVal) };
       }
       cellObjs.push({
         userEnteredValue,
@@ -142,6 +148,17 @@ export function buildRestoreBatchUpdateRequests(backupRecord) {
       },
     });
   }
+  (snap.conditionalFormats || []).forEach((rule, index) => {
+    requests.push({
+      addConditionalFormatRule: {
+        rule: {
+          ...rule,
+          ranges: (rule.ranges || []).map((rng) => ({ ...rng, sheetId })),
+        },
+        index,
+      },
+    });
+  });
 
   return requests;
 }
@@ -290,6 +307,13 @@ export function createSheetBackupManager({
           ok: false,
           quotaExceeded: saveRes.quotaExceeded,
           error: `Backup save failed: ${saveRes.error}`,
+        };
+      }
+      const readBack = await db.getByKey(STORES.BACKUPS, backupId);
+      if (!readBack || readBack.contentIntegrityHash !== contentIntegrityHash) {
+        return {
+          ok: false,
+          error: "Backup persistence read-back verification failed.",
         };
       }
     }

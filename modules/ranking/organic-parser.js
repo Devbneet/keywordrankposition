@@ -369,9 +369,13 @@ export function parseGoogleSerpHtml({ html, pageUrl = "https://www.google.com/se
     results.length === 0 &&
     /did not match any documents|no results found for/i.test(html);
 
-  const endOfResultsVerified = Boolean(
-    confirmedEmpty || (results.length > 0 && !nextPageUrl)
-  );
+  const explicitEndMarker =
+    /in order to show you the most relevant results,\s*we have omitted some entries|no more results|you have reached the end of/i.test(
+      html
+    );
+
+  // Never treat a missing next-page link alone as verified end of results.
+  const endOfResultsVerified = Boolean(confirmedEmpty || explicitEndMarker);
 
   return {
     ok: true,

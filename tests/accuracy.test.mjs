@@ -115,15 +115,24 @@ test("Phase 4 regression: incomplete depth with remaining nextPageUrl cannot ret
   assert.equal(calc.status, RANKING_STATUSES.INCOMPLETE_SEARCH);
   assert.equal(calc.verifiedEndOfResults, false);
 
-  // Genuine end of results (page 2 has no nextPageUrl and domain still absent) returns Not found
+  // Missing nextPageUrl with only 20 of 50 requested results and NO explicit end marker must be Incomplete search
   const page2 = { ...parseGoogleSerpHtml({ html: readFixture("serp_page2_rich.html") }), pageNumber: 2 };
-  const verifiedEnd = calculateOrganicRanking({
+  const incompleteMissingNext = calculateOrganicRanking({
     pages: [page1, page2],
     targetDomain: "missing-domain.org",
     requestedDepth: 50,
   });
-  assert.equal(verifiedEnd.status, RANKING_STATUSES.NOT_FOUND);
-  assert.equal(verifiedEnd.verifiedEndOfResults, true);
+  assert.equal(incompleteMissingNext.status, RANKING_STATUSES.INCOMPLETE_SEARCH);
+  assert.equal(incompleteMissingNext.verifiedEndOfResults, false);
+
+  // Full requested depth (20 of 20) OR explicit end marker returns Not found
+  const verifiedDepth = calculateOrganicRanking({
+    pages: [page1, page2],
+    targetDomain: "missing-domain.org",
+    requestedDepth: 20,
+  });
+  assert.equal(verifiedDepth.status, RANKING_STATUSES.NOT_FOUND);
+  assert.equal(verifiedDepth.verifiedEndOfResults, true);
 });
 
 test("Phase 4 regression: manual SERP HTML is explicitly labeled not live verified and stale location is rejected", async () => {
@@ -177,6 +186,8 @@ test("Phase 4 regression: manual SERP HTML is explicitly labeled not live verifi
       state: "Google location matched",
       browserGpsStatus: "GPS verified",
       googleLocationStatus: "Google location matched",
+      googleLocationSourceType: "device",
+      strictRankingEligible: true,
       tabId: 1,
       debuggerAttached: true,
       lastVerifiedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
@@ -199,6 +210,7 @@ test("Phase 4 regression: manual SERP HTML is explicitly labeled not live verifi
     keyword: "seo agency sydney",
     searchDepth: 10,
     maxLocationAgeMs: 5 * 60 * 1000,
+    isAuthorized: true,
   });
   assert.equal(staleRes.ok, false);
   assert.equal(staleRes.result.status, RANKING_STATUSES.LOCATION_UNVERIFIED);

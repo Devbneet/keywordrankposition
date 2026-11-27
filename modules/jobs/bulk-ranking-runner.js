@@ -5,7 +5,7 @@
  */
 
 import { GOOGLE_LOCATION_STATUSES, hasConfigChanged, LOCATION_STATES } from "../location/location-state.js";
-import { RANKING_STATUSES } from "../ranking/ranking-state.js";
+import { isCanonicalLiveVerified, RANKING_STATUSES } from "../ranking/ranking-state.js";
 import { isFailedTaskStatus, JOB_STATES, TASK_STATUSES } from "./job-state.js";
 
 function mapRankingStatusToTaskStatus(rankingStatus) {
@@ -113,7 +113,7 @@ export function createBulkRankingRunner({
       };
     }
 
-    if (liveLocation.googleLocationStatus !== GOOGLE_LOCATION_STATUSES.MATCHED) {
+    if (liveLocation.googleLocationStatus !== GOOGLE_LOCATION_STATUSES.MATCHED || liveLocation.strictRankingEligible === false) {
       return {
         ok: false,
         taskStatus:
@@ -222,6 +222,7 @@ export function createBulkRankingRunner({
           keyword: task.keyword,
           searchDepth: task.requestedDepth,
           deviceType: currentJob.deviceType || "Desktop",
+          isAuthorized: Boolean(currentJob.isAuthorized),
           _caller: "bulk",
         });
 
@@ -230,16 +231,21 @@ export function createBulkRankingRunner({
           ? mapRankingStatusToTaskStatus(r.status)
           : TASK_STATUSES.INCOMPLETE_SEARCH;
 
+        const verifiedDepth = Number(r?.actualVerifiedDepth ?? r?.checkedResults ?? 0);
         const completedTask = {
           ...runningTask,
           status: mappedStatus,
           position: mappedStatus === TASK_STATUSES.RANKED ? r.position : null,
           rankingUrl: mappedStatus === TASK_STATUSES.RANKED ? r.rankingUrl : null,
-          checkedResults: r?.checkedResults ?? 0,
+          checkedResults: verifiedDepth,
+          actualVerifiedDepth: verifiedDepth,
+          verifiedEndOfResults: Boolean(r?.verifiedEndOfResults),
           googleDetectedLocation: r?.googleDetectedLocation || locCheck.liveLocation.googleDetectedLocation,
           locationVerificationStatus: r?.googleLocationStatus || locCheck.liveLocation.googleLocationStatus,
           googleLocationSource: r?.googleLocationSource || locCheck.liveLocation.googleLocationSource,
-          isLiveVerified: Boolean(r?.isLiveVerified),
+          googleLocationSourceType: r?.googleLocationSourceType || locCheck.liveLocation.googleLocationSourceType || null,
+          sourceMode: r?.sourceMode || "live_google",
+          isLiveVerified: isCanonicalLiveVerified(r),
           durationMs: r?.durationMs ?? null,
           checkedAt: r?.checkedAt || new Date().toISOString(),
           errorDetails: r?.errorDetails || checkRes?.error || null,

@@ -12,8 +12,10 @@ import {
 import { invalidateRankingResultsOnLocationChange } from "../ranking/ranking-state.js";
 import {
   clearVerificationFields,
+  computeLocationConfigFingerprint,
   createDefaultLocationState,
   GOOGLE_LOCATION_STATUSES,
+  GOOGLE_MATCH_CLASSIFICATIONS,
   hasConfigChanged,
   loadLocationState,
   LOCATION_STATES,
@@ -448,6 +450,7 @@ export function createGeolocationController({ chromeApi = globalThis.chrome, sto
     const googleRes = await verifyGoogleSearchLocation({
       tabId: current.tabId,
       targetCity: current.config.targetCity || current.config.locationName,
+      targetState: current.config.targetState || "",
       targetCountry: current.config.country,
       clickUpdateLocation,
       chromeApi,
@@ -456,9 +459,11 @@ export function createGeolocationController({ chromeApi = globalThis.chrome, sto
     const stillAttached = googleRes.status !== GOOGLE_LOCATION_STATUSES.DEBUGGER_DISCONNECTED;
     const nextState = await saveLocationState(storageClient, {
       ...current,
+      configFingerprint: computeLocationConfigFingerprint(current.config),
       debuggerAttached: stillAttached,
       browserGpsStatus: gpsCheck.state,
       permissionStatus: gpsCheck.permissionStatus,
+      permissionErrorCode: gpsCheck.permissionErrorCode || null,
       reportedCoords: gpsCheck.reportedCoords,
       latitudeDelta: gpsCheck.latitudeDelta,
       longitudeDelta: gpsCheck.longitudeDelta,
@@ -468,12 +473,16 @@ export function createGeolocationController({ chromeApi = globalThis.chrome, sto
       googleLocationSource: googleRes.locationSource,
       googleLocationSourceType: googleRes.locationSourceType,
       googleMatchType: googleRes.matchType || "none",
+      googleMatchClassification: googleRes.matchClassification || GOOGLE_MATCH_CLASSIFICATIONS.UNVERIFIED,
+      strictRankingEligible: Boolean(googleRes.strictRankingEligible && gpsCheck.state === LOCATION_STATES.GPS_VERIFIED),
       googleLastVerifiedAt: googleRes.checkedAt,
       googleVerificationEvidence: {
         pageUrl: googleRes.pageUrl,
         checkedAt: googleRes.checkedAt,
         matchedBy: googleRes.matchedBy,
         sourceType: googleRes.locationSourceType,
+        matchClassification: googleRes.matchClassification,
+        strictRankingEligible: Boolean(googleRes.strictRankingEligible),
       },
       state: googleRes.status,
       lastError: googleRes.error,
@@ -481,7 +490,7 @@ export function createGeolocationController({ chromeApi = globalThis.chrome, sto
     });
 
     return {
-      ok: nextState.googleLocationStatus === GOOGLE_LOCATION_STATUSES.MATCHED,
+      ok: nextState.googleLocationStatus === GOOGLE_LOCATION_STATUSES.MATCHED && nextState.strictRankingEligible === true,
       state: nextState,
       error: googleRes.error,
     };
@@ -564,26 +573,35 @@ export function createGeolocationController({ chromeApi = globalThis.chrome, sto
       lastVerifiedAt: gpsCheck?.lastVerifiedAt || current.lastVerifiedAt,
     };
 
-    if (googleFooterCheck?.status === GOOGLE_LOCATION_STATUSES.MATCHED) {
+    if (googleFooterCheck?.status === GOOGLE_LOCATION_STATUSES.MATCHED && googleFooterCheck?.strictRankingEligible) {
       next.googleLocationStatus = googleFooterCheck.status;
       next.googleDetectedLocation = googleFooterCheck.detectedLocation;
       next.googleLocationSource = googleFooterCheck.locationSource;
       next.googleLocationSourceType = googleFooterCheck.locationSourceType;
       next.googleMatchType = googleFooterCheck.matchType || "none";
+      next.googleMatchClassification = googleFooterCheck.matchClassification || GOOGLE_MATCH_CLASSIFICATIONS.DEVICE_CITY;
+      next.strictRankingEligible = true;
       next.googleLastVerifiedAt = googleFooterCheck.checkedAt;
       next.googleVerificationEvidence = {
         pageUrl,
         checkedAt: googleFooterCheck.checkedAt,
         matchedBy: googleFooterCheck.matchedBy,
         sourceType: googleFooterCheck.locationSourceType,
+        matchClassification: googleFooterCheck.matchClassification,
+        strictRankingEligible: true,
       };
       next.state = googleFooterCheck.status;
-    } else if (next.googleVerificationEvidence) {
-      // Same authorized session on a Google search page without a footer keeps session aligned with tabUrl.
-      next.googleVerificationEvidence = {
-        ...next.googleVerificationEvidence,
-        pageUrl,
-      };
+    } else {
+      // Never silently reuse stale Google location verification when fresh evidence is unavailable or non-device.
+      next.googleLocationStatus = googleFooterCheck?.status || GOOGLE_LOCATION_STATUSES.UNAVAILABLE;
+      next.googleDetectedLocation = googleFooterCheck?.detectedLocation || null;
+      next.googleLocationSource = googleFooterCheck?.locationSource || null;
+      next.googleLocationSourceType = googleFooterCheck?.locationSourceType || null;
+      next.googleMatchType = googleFooterCheck?.matchType || "none";
+      next.googleMatchClassification = googleFooterCheck?.matchClassification || GOOGLE_MATCH_CLASSIFICATIONS.UNVERIFIED;
+      next.strictRankingEligible = false;
+      next.googleVerificationEvidence = null;
+      next.warningMessage = googleFooterCheck?.warning || "Google location evidence unavailable on this page; previous verification invalidated.";
     }
 
     return saveLocationState(storageClient, next);

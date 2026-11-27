@@ -258,19 +258,42 @@ export function detectSheetStructure({
     if (isKeywordTableHeaderRow(row, activeColMap)) {
       headerRowNumbers.push(rowNumber);
 
-      // Update group if the row immediately above this repeated header looks like a group banner
-      const prevRow = rIdx > 0 ? displayRows[rIdx - 1] || [] : [];
-      const prevNonEmpty = prevRow.map(normalizeCellText).filter(Boolean);
-      const prevKw = normalizeCellText(prevRow[activeColMap.keywordIdx]);
-      const candidateGroupLabel =
-        prevKw && !isNonKeywordMetricLabel(prevKw) && !isKeywordTableHeaderRow(prevRow, activeColMap)
-          ? prevKw
-          : prevNonEmpty.length === 1 && !isNonKeywordMetricLabel(prevNonEmpty[0])
-            ? prevNonEmpty[0]
-            : "";
+      // Look back up to 2 non-empty rows (skipping blank rows) for a group title or merged banner
+      let candidateGroupLabel = "";
+      let scannedNonEmpty = 0;
+      for (let lookIdx = rIdx - 1; lookIdx >= 0 && scannedNonEmpty < 2; lookIdx -= 1) {
+        const candidateRow = displayRows[lookIdx] || [];
+        const nonEmpty = candidateRow.map(normalizeCellText).filter(Boolean);
+        if (nonEmpty.length === 0) continue;
+        scannedNonEmpty += 1;
+        if (isKeywordTableHeaderRow(candidateRow, activeColMap)) break;
+        if (websiteStatsRows.some((s) => s.rowNumber === lookIdx + 1)) break;
 
-      if (candidateGroupLabel && !websiteStatsRows.some((s) => s.rowNumber === rowNumber - 1)) {
+        const kwColText = normalizeCellText(candidateRow[activeColMap.keywordIdx]);
+        const firstColText = normalizeCellText(candidateRow[0]);
+        const hasMergedBanner = isCellMerged(lookIdx, 0) || isCellMerged(lookIdx, activeColMap.keywordIdx);
+
+        if (kwColText && !isNonKeywordMetricLabel(kwColText) && (nonEmpty.length <= 2 || hasMergedBanner)) {
+          candidateGroupLabel = kwColText;
+          break;
+        }
+        if ((nonEmpty.length === 1 || hasMergedBanner) && !isNonKeywordMetricLabel(nonEmpty[0])) {
+          candidateGroupLabel = firstColText || nonEmpty[0];
+          break;
+        }
+        if (firstColText && !kwColText && !isNonKeywordMetricLabel(firstColText) && nonEmpty.length <= 2) {
+          candidateGroupLabel = firstColText;
+          break;
+        }
+      }
+
+      if (candidateGroupLabel) {
         currentGroup = candidateGroupLabel;
+      } else if (headerRowNumbers.length > 1) {
+        currentGroup = `Section ${headerRowNumbers.length}`;
+        warnings.push(
+          `Repeated keyword table at row ${rowNumber} had no explicit group heading; assigned '${currentGroup}'.`
+        );
       }
 
       if (!groups.some((g) => g.groupName === currentGroup && g.headerRowNumber === rowNumber)) {
@@ -469,14 +492,14 @@ export function detectSheetStructure({
       templateHeaderFormat:
         firstHeaderCandidateIdx !== -1
           ? rowGridMeta[firstHeaderCandidateIdx]?.values?.[activeColMap.latestDateIdx]?.userEnteredFormat ||
-            rowGridMeta[firstHeaderCandidateIdx]?.values?.[activeColMap.latestDateIdx]?.effectiveFormat ||
-            null
+          rowGridMeta[firstHeaderCandidateIdx]?.values?.[activeColMap.latestDateIdx]?.effectiveFormat ||
+          null
           : null,
       templateDataFormat:
         keywordRows[0]
           ? rowGridMeta[keywordRows[0].rowNumber - 1]?.values?.[activeColMap.latestDateIdx]?.userEnteredFormat ||
-            rowGridMeta[keywordRows[0].rowNumber - 1]?.values?.[activeColMap.latestDateIdx]?.effectiveFormat ||
-            null
+          rowGridMeta[keywordRows[0].rowNumber - 1]?.values?.[activeColMap.latestDateIdx]?.effectiveFormat ||
+          null
           : null,
     },
     isAmbiguous,

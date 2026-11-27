@@ -20,17 +20,32 @@ export function calculateOrganicRanking({
   const depth = Number(requestedDepth) || 50;
   const flattened = [];
   const seenUrls = new Set();
+  const seenPageUrls = new Set();
   const pageList = Array.isArray(pages) ? pages : [];
   let hasIncompletePage = Boolean(incompleteReason) || pageList.length === 0;
   let lastError = incompleteReason || (pageList.length === 0 ? "No SERP pages were checked." : null);
+  let extractedResultsCount = 0;
 
   for (const page of pageList) {
+    if (page.pageUrl) {
+      const normPageUrl = normalizeUrlForDedupe(page.pageUrl);
+      if (seenPageUrls.has(normPageUrl)) {
+        hasIncompletePage = true;
+        lastError = `Pagination loop detected: repeated SERP URL '${page.pageUrl}'.`;
+        break;
+      }
+      seenPageUrls.add(normPageUrl);
+    }
     if (page.blocked) {
       return {
         status: RANKING_STATUSES.SEARCH_BLOCKED,
         position: null,
         rankingUrl: null,
         checkedResults: flattened.length,
+        actualVerifiedDepth: flattened.length,
+        extractedResultsCount,
+        verifiedPositionsCount: flattened.length,
+        uniqueUrlsCount: seenUrls.size,
         requestedDepth: depth,
         verifiedEndOfResults: false,
         resultsTable: flattened,
@@ -44,6 +59,10 @@ export function calculateOrganicRanking({
         position: null,
         rankingUrl: null,
         checkedResults: flattened.length,
+        actualVerifiedDepth: flattened.length,
+        extractedResultsCount,
+        verifiedPositionsCount: flattened.length,
+        uniqueUrlsCount: seenUrls.size,
         requestedDepth: depth,
         verifiedEndOfResults: false,
         resultsTable: flattened,
@@ -56,12 +75,16 @@ export function calculateOrganicRanking({
       lastError = page.incompleteReason;
     }
 
-    for (const item of page.results || []) {
+    const pageItems = page.results || [];
+    extractedResultsCount += pageItems.length;
+    let newUniqueOnPage = 0;
+    for (const item of pageItems) {
       const dedupeKey = normalizeUrlForDedupe(item.url);
       if (seenUrls.has(dedupeKey)) {
         continue;
       }
       seenUrls.add(dedupeKey);
+      newUniqueOnPage += 1;
 
       const position = flattened.length + 1;
       flattened.push({
@@ -75,6 +98,12 @@ export function calculateOrganicRanking({
       if (flattened.length >= depth) {
         break;
       }
+    }
+
+    if (pageItems.length > 0 && newUniqueOnPage === 0) {
+      hasIncompletePage = true;
+      lastError = `Duplicate SERP page results detected on page ${page.pageNumber || "?"}.`;
+      break;
     }
 
     if (flattened.length >= depth) {
@@ -97,6 +126,10 @@ export function calculateOrganicRanking({
       position: matched.position,
       rankingUrl: matched.url,
       checkedResults: flattened.length,
+      actualVerifiedDepth: flattened.length,
+      extractedResultsCount,
+      verifiedPositionsCount: flattened.length,
+      uniqueUrlsCount: seenUrls.size,
       requestedDepth: depth,
       verifiedEndOfResults: genuineEndReached,
       resultsTable: flattened,
@@ -119,6 +152,10 @@ export function calculateOrganicRanking({
       position: null,
       rankingUrl: null,
       checkedResults: flattened.length,
+      actualVerifiedDepth: flattened.length,
+      extractedResultsCount,
+      verifiedPositionsCount: flattened.length,
+      uniqueUrlsCount: seenUrls.size,
       requestedDepth: depth,
       verifiedEndOfResults: false,
       resultsTable: flattened,
@@ -131,6 +168,10 @@ export function calculateOrganicRanking({
     position: null,
     rankingUrl: null,
     checkedResults: flattened.length,
+    actualVerifiedDepth: flattened.length,
+    extractedResultsCount,
+    verifiedPositionsCount: flattened.length,
+    uniqueUrlsCount: seenUrls.size,
     requestedDepth: depth,
     verifiedEndOfResults: true,
     resultsTable: flattened,

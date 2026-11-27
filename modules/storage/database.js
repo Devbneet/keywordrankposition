@@ -76,6 +76,8 @@ function runTx(db, storeNames, mode, fn) {
   });
 }
 
+const fallbackWriteChains = new WeakMap();
+
 export function createDatabase({
   storageClient,
   idbFactory = globalThis.indexedDB || null,
@@ -85,10 +87,13 @@ export function createDatabase({
     throw new Error("storageClient is required for createDatabase.");
   }
 
-  let fallbackWriteChain = Promise.resolve();
   function serializeFallbackWrite(fn) {
-    const next = fallbackWriteChain.then(fn, fn);
-    fallbackWriteChain = next.catch(() => {});
+    const prev = fallbackWriteChains.get(storageClient) || Promise.resolve();
+    const next = prev.then(fn, fn);
+    fallbackWriteChains.set(
+      storageClient,
+      next.catch(() => {})
+    );
     return next;
   }
 
@@ -259,6 +264,71 @@ export function createDatabase({
     return { backend: "chrome.storage.local", version: ver, stores: Object.keys(data) };
   }
 
+  /**
+   * Perform a genuine atomic read-modify-write on a single key:
+   * - IndexedDB: single readwrite transaction (get + put in same tx, resolves on tx.oncomplete)
+   * - Fallback storage: serialized per storageClient instance
+   */
+  async function atomicUpdate(storeName, key, updaterFn) {
+    if (!key) {
+      return { ok: false, error: "Key is required for atomicUpdate." };
+    }
+    try {
+      if (idbFactory) {
+        const db = await openIndexedDb(idbFactory, schemaVersion);
+        try {
+          return await new Promise((resolve, reject) => {
+            const tx = db.transaction([storeName], "readwrite");
+            const store = tx.objectStore(storeName);
+            let decision = null;
+
+            const getReq = store.get(key);
+            getReq.onsuccess = () => {
+              try {
+                decision = updaterFn(getReq.result || null);
+                if (!decision || !decision.ok) {
+                  return;
+                }
+                store.put(decision.value);
+              } catch (err) {
+                decision = { ok: false, error: err instanceof Error ? err.message : String(err) };
+              }
+            };
+            getReq.onerror = () => {
+              reject(getReq.error || new Error(`atomicUpdate read failed on ${storeName}.`));
+            };
+            tx.oncomplete = () => {
+              resolve(decision || { ok: false, error: "No decision returned from updaterFn." });
+            };
+            tx.onerror = () => reject(tx.error || new Error(`atomicUpdate tx failed on ${storeName}.`));
+            tx.onabort = () => reject(tx.error || new Error(`atomicUpdate tx aborted on ${storeName}.`));
+          });
+        } finally {
+          db.close();
+        }
+      }
+
+      return await serializeFallbackWrite(async () => {
+        const { data } = await ensureFallbackSchema(storageClient, schemaVersion);
+        if (!data[storeName]) data[storeName] = {};
+        const current = data[storeName][key] || null;
+        const decision = updaterFn(current);
+        if (!decision || !decision.ok) {
+          return decision || { ok: false, error: "No decision returned from updaterFn." };
+        }
+        data[storeName][key] = decision.value;
+        await storageClient.set({ [DB_FALLBACK_KEY]: data });
+        return decision;
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        quotaExceeded: isQuotaError(error),
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   return {
     getAll,
     getByKey,
@@ -266,6 +336,7 @@ export function createDatabase({
     putOne,
     putMany,
     deleteMany,
+    atomicUpdate,
     getSchemaInfo,
   };
 }

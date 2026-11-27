@@ -92,6 +92,7 @@ const rankDomainInput = document.getElementById("rank-domain");
 const rankKeywordInput = document.getElementById("rank-keyword");
 const rankDepthSelect = document.getElementById("rank-depth");
 const rankUseManualHtmlChk = document.getElementById("rank-use-manual-html");
+const rankAuthorizedChk = document.getElementById("rank-authorized");
 const rankManualPanel = document.getElementById("rank-manual-panel");
 const rankManualFileInput = document.getElementById("rank-manual-file");
 const rankManualHtmlInput = document.getElementById("rank-manual-html");
@@ -156,6 +157,15 @@ const bulkCsvFileInput = document.getElementById("bulk-csv-file");
 const bulkTxtFileInput = document.getElementById("bulk-txt-file");
 const bulkImportLabBtn = document.getElementById("btn-bulk-import-lab");
 const bulkImportSheetsBtn = document.getElementById("btn-bulk-import-sheets");
+const bulkFirst3Btn = document.getElementById("btn-bulk-first-3");
+const bulkFirst5Btn = document.getElementById("btn-bulk-first-5");
+const bulkFirst10Btn = document.getElementById("btn-bulk-first-10");
+const bulkSelectAllBtn = document.getElementById("btn-bulk-select-all");
+const bulkDeselectAllBtn = document.getElementById("btn-bulk-deselect-all");
+const bulkSelectedCountEl = document.getElementById("bulk-selected-count");
+const bulkKwSearchInput = document.getElementById("bulk-kw-search");
+const bulkGroupFilterSelect = document.getElementById("bulk-group-filter");
+const bulkAuthorizedChk = document.getElementById("bulk-authorized");
 const bulkKeywordsInput = document.getElementById("bulk-keywords");
 const bulkFeedbackEl = document.getElementById("bulk-feedback");
 const bulkStartBtn = document.getElementById("btn-bulk-start");
@@ -615,7 +625,22 @@ locCountrySelect.addEventListener("change", () => { const p = getCountryPreset(l
 
 rankingForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.RANKING_CHECK, payload: { websiteDomain: rankDomainInput.value, keyword: rankKeywordInput.value, searchDepth: Number(rankDepthSelect.value), useManualHtml: rankUseManualHtmlChk.checked, manualSerpHtml: rankManualHtmlInput.value, deviceType: accDeviceSelect.value } });
+  const isManual = rankUseManualHtmlChk.checked;
+  if (!isManual && !rankAuthorizedChk?.checked) {
+    return setBanner(rankFeedbackEl, "error", "Confirm authorized search access before running a live ranking check.");
+  }
+  const res = await chrome.runtime.sendMessage({
+    type: MESSAGE_TYPES.RANKING_CHECK,
+    payload: {
+      websiteDomain: rankDomainInput.value,
+      keyword: rankKeywordInput.value,
+      searchDepth: Number(rankDepthSelect.value),
+      useManualHtml: isManual,
+      manualSerpHtml: rankManualHtmlInput.value,
+      deviceType: accDeviceSelect.value,
+      isAuthorized: Boolean(rankAuthorizedChk?.checked),
+    },
+  });
   if (res?.result) renderRankingResult(res.result);
   else if (res?.error) setBanner(rankFeedbackEl, "error", res.error);
 });
@@ -624,21 +649,62 @@ clearRankingBtn.addEventListener("click", async () => { await chrome.runtime.sen
 rankUseManualHtmlChk.addEventListener("change", () => rankManualPanel.classList.toggle("hidden", !rankUseManualHtmlChk.checked));
 rankManualFileInput.addEventListener("change", async () => { const f = rankManualFileInput.files?.[0]; if (f) rankManualHtmlInput.value = await f.text(); });
 
-bulkCsvFileInput.addEventListener("change", async () => { const f = bulkCsvFileInput.files?.[0]; if (!f) return; parsedBulkQueueInput = parseKeywordCsvInput(await f.text()); bulkKeywordsInput.value = parsedBulkQueueInput.map((k) => k.keyword).join("\n"); });
-bulkTxtFileInput.addEventListener("change", async () => { const f = bulkTxtFileInput.files?.[0]; if (!f) return; parsedBulkQueueInput = parseKeywordTextInput(await f.text()); bulkKeywordsInput.value = parsedBulkQueueInput.map((k) => k.keyword).join("\n"); });
-bulkImportLabBtn.addEventListener("click", () => { parsedBulkQueueInput = importKeywordsFromBaselineRows(validationState.baselineRows); bulkKeywordsInput.value = parsedBulkQueueInput.map((k) => k.keyword).join("\n"); });
+let loadedBulkSourceKeywords = [];
+function updateBulkSelectionUi(entries) {
+  parsedBulkQueueInput = Array.isArray(entries) && entries.length > 0 ? entries : null;
+  const list = entries || [];
+  bulkKeywordsInput.value = list.map((k) => k.keyword).join("\n");
+  if (bulkSelectedCountEl) bulkSelectedCountEl.textContent = String(list.length);
+}
+function populateBulkGroupOptions(entries = []) {
+  if (!bulkGroupFilterSelect) return;
+  const groups = [...new Set(entries.map((e) => e.keywordGroup).filter(Boolean))];
+  bulkGroupFilterSelect.replaceChildren(new Option("All Keyword Groups", ""));
+  for (const g of groups) bulkGroupFilterSelect.appendChild(new Option(g, g));
+}
+function applyBulkSubsetFilter(limit = null) {
+  const q = (bulkKwSearchInput?.value || "").trim().toLowerCase();
+  const grp = bulkGroupFilterSelect?.value || "";
+  const base = loadedBulkSourceKeywords.length > 0 ? loadedBulkSourceKeywords : parseKeywordTextInput(bulkKeywordsInput.value);
+  let filtered = base.filter((k) => {
+    if (q && !String(k.keyword || "").toLowerCase().includes(q)) return false;
+    if (grp && k.keywordGroup !== grp) return false;
+    return true;
+  });
+  if (typeof limit === "number" && limit > 0) filtered = filtered.slice(0, limit);
+  updateBulkSelectionUi(filtered);
+}
+
+bulkCsvFileInput.addEventListener("change", async () => { const f = bulkCsvFileInput.files?.[0]; if (!f) return; loadedBulkSourceKeywords = parseKeywordCsvInput(await f.text()); populateBulkGroupOptions(loadedBulkSourceKeywords); updateBulkSelectionUi(loadedBulkSourceKeywords); });
+bulkTxtFileInput.addEventListener("change", async () => { const f = bulkTxtFileInput.files?.[0]; if (!f) return; loadedBulkSourceKeywords = parseKeywordTextInput(await f.text()); populateBulkGroupOptions(loadedBulkSourceKeywords); updateBulkSelectionUi(loadedBulkSourceKeywords); });
+bulkImportLabBtn.addEventListener("click", () => { loadedBulkSourceKeywords = importKeywordsFromBaselineRows(validationState.baselineRows); populateBulkGroupOptions(loadedBulkSourceKeywords); updateBulkSelectionUi(loadedBulkSourceKeywords); });
 bulkImportSheetsBtn.addEventListener("click", () => {
   const ws = clientsPage.getActiveWorkspace();
   const kws = (ws?.keywords || []).filter((k) => k.source === "google_sheets" && k.active !== false && !k.excluded);
   if (kws.length === 0) return setBanner(bulkFeedbackEl, "error", "Import Google Sheets keywords for this client first.");
-  parsedBulkQueueInput = kws;
-  bulkKeywordsInput.value = kws.map((k) => k.keyword).join("\n");
+  loadedBulkSourceKeywords = kws;
+  populateBulkGroupOptions(loadedBulkSourceKeywords);
+  updateBulkSelectionUi(kws);
+});
+bulkFirst3Btn?.addEventListener("click", () => applyBulkSubsetFilter(3));
+bulkFirst5Btn?.addEventListener("click", () => applyBulkSubsetFilter(5));
+bulkFirst10Btn?.addEventListener("click", () => applyBulkSubsetFilter(10));
+bulkSelectAllBtn?.addEventListener("click", () => applyBulkSubsetFilter(null));
+bulkDeselectAllBtn?.addEventListener("click", () => updateBulkSelectionUi([]));
+bulkKwSearchInput?.addEventListener("input", () => applyBulkSubsetFilter(null));
+bulkGroupFilterSelect?.addEventListener("change", () => applyBulkSubsetFilter(null));
+bulkKeywordsInput.addEventListener("input", () => {
+  parsedBulkQueueInput = null;
+  if (bulkSelectedCountEl) bulkSelectedCountEl.textContent = String(parseKeywordTextInput(bulkKeywordsInput.value).length);
 });
 bulkStartBtn.addEventListener("click", async () => {
+  if (!bulkAuthorizedChk?.checked) {
+    return setBanner(bulkFeedbackEl, "error", "Confirm authorized search access before starting a bulk ranking check.");
+  }
   const entries = parsedBulkQueueInput || parseKeywordTextInput(bulkKeywordsInput.value);
   if (entries.length === 0) return setBanner(bulkFeedbackEl, "error", "Enter at least one keyword.");
   const ws = clientsPage.getActiveWorkspace();
-  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.BULK_START, payload: { clientId: ws?.client?.clientId || null, locationId: ws?.selectedLocation?.locationId || null, websiteDomain: rankDomainInput.value, keywords: entries, searchDepth: Number(rankDepthSelect.value), deviceType: bulkDeviceSelect.value } });
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.BULK_START, payload: { clientId: ws?.client?.clientId || null, locationId: ws?.selectedLocation?.locationId || null, websiteDomain: rankDomainInput.value, keywords: entries, searchDepth: Number(rankDepthSelect.value), deviceType: bulkDeviceSelect.value, isAuthorized: Boolean(bulkAuthorizedChk.checked) } });
   if (res?.job) renderBulkJobState({ job: res.job, tasks: res.tasks || [], isBusy: false });
   if (!res?.ok) setBanner(bulkFeedbackEl, "error", res?.error || "Bulk check stopped.");
   await clientsPage.refreshOverviews({ preserveWorkspace: true });
@@ -810,6 +876,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     getLocationDefaults: () => ({ accuracy: Number(locAccuracyInput.value) || 20, country: locCountrySelect.value, language: locLanguageSelect.value, googleDomain: locGoogleDomainSelect.value }),
     getRankingDefaults: () => ({ deviceType: bulkDeviceSelect.value, searchDepth: Number(rankDepthSelect.value) || 50 }),
     onClientSelected: (ws) => applyWorkspaceToSharedInputs(ws),
+    onOverviewsUpdated: (ovs, activeId) => syncTopbarClientDropdown(ovs, activeId),
     onStartCheckFlow: (ws) => {
       if ((ws?.keywords || []).length > 0) clientsPage.clientLoadBulkBtn.click();
       navCtrl.navigateTo("jobs");

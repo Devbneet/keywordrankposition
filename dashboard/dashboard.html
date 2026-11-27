@@ -42,7 +42,7 @@
         <header class="saas-topbar">
           <div>
             <strong style="font-size: 16px;">Digital Minds Rank Tracker</strong>
-            <span id="dash-phase-chip" class="phase-chip" style="margin-left: 8px;">v1.0.0-rc.1 — Agency Rank Tracker</span>
+            <span id="dash-phase-chip" class="phase-chip" style="margin-left: 8px;">v1.0.0-rc.2 — Agency Rank Tracker</span>
           </div>
           <div class="topbar-controls">
             <select id="topbar-client-select" class="topbar-client-select" aria-label="Quick client switcher">
@@ -654,13 +654,25 @@
                 </div>
                 <div class="form-row">
                   <div class="action-group-header">
-                    <label for="bulk-keywords">Keywords</label>
+                    <label for="bulk-keywords">Keywords (<span id="bulk-selected-count">0</span> selected)</label>
                     <div class="actions">
+                      <button id="btn-bulk-first-3" class="btn-outline btn-compact" type="button">First 3</button>
+                      <button id="btn-bulk-first-5" class="btn-outline btn-compact" type="button">First 5</button>
+                      <button id="btn-bulk-first-10" class="btn-outline btn-compact" type="button">First 10</button>
+                      <button id="btn-bulk-select-all" class="btn-outline btn-compact" type="button">All</button>
+                      <button id="btn-bulk-deselect-all" class="btn-outline btn-compact" type="button">Deselect</button>
                       <button id="btn-bulk-import-sheets" class="btn-link" type="button">Load from Google Sheets</button>
                       <button id="btn-bulk-import-lab" class="btn-link" type="button">Import from Accuracy Lab</button>
                     </div>
                   </div>
+                  <div class="form-grid-2" style="margin-bottom: 6px;">
+                    <input id="bulk-kw-search" class="inline-input" type="text" placeholder="Filter loaded keywords..." />
+                    <select id="bulk-group-filter" class="inline-input"><option value="">All Keyword Groups</option></select>
+                  </div>
                   <textarea id="bulk-keywords" rows="4" placeholder="Enter keywords (one per line)..."></textarea>
+                </div>
+                <div class="actions" style="margin-bottom: 8px;">
+                  <label class="checkbox-inline"><input id="bulk-authorized" type="checkbox" /> I confirm authorized search access for this ranking check</label>
                 </div>
                 <div id="bulk-feedback" class="feedback-banner hidden" role="alert"></div>
                 <div class="button-bar">
@@ -898,6 +910,7 @@
                   <div class="form-row"><label for="rank-depth">Depth</label><select id="rank-depth"><option value="10">10</option><option value="20">20</option><option value="30">30</option><option value="50" selected>50</option><option value="100">100</option></select></div>
                 </div>
                 <div class="manual-html-box">
+                  <label class="checkbox-inline"><input id="rank-authorized" type="checkbox" /> I confirm authorized search access for live ranking check</label>
                   <label class="checkbox-inline"><input id="rank-use-manual-html" type="checkbox" /> Use Manual SERP HTML (never written to live sheets)</label>
                   <div id="rank-manual-panel" class="manual-panel hidden">
                     <div class="form-row"><label for="rank-manual-file">Upload HTML</label><input id="rank-manual-file" type="file" accept=".html,.htm" /></div>
